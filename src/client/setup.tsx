@@ -1,7 +1,14 @@
 import './index.css';
 import { useEffect, useState } from 'react';
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from 'react';
-import { exitExpandedMode, getWebViewMode, navigateTo, requestExpandedMode } from '@devvit/web/client';
+import {
+  addWebViewModeListener,
+  exitExpandedMode,
+  getWebViewMode,
+  navigateTo,
+  removeWebViewModeListener,
+  requestExpandedMode,
+} from '@devvit/web/client';
 import { isVideoUrl } from '../shared/game';
 import type { Challenge, ChallengeEntry } from '../shared/game';
 
@@ -165,6 +172,49 @@ export const SetupApp = () => {
     void request<{ drafts: Challenge[] }>('/api/drafts')
       .then((data) => setDrafts(data.drafts))
       .catch(() => undefined);
+  }, []);
+
+  // When expanded view is closed, return to "Choose a Mode" screen
+  useEffect(() => {
+    const handleModeChange = (newMode: 'inline' | 'expanded') => {
+      if (newMode === 'inline') {
+        setMode(null);
+      }
+    };
+
+    try {
+      addWebViewModeListener(handleModeChange);
+    } catch (e) {
+      console.warn('addWebViewModeListener:', e);
+    }
+
+    const checkCurrentMode = () => {
+      try {
+        if (getWebViewMode() === 'inline') {
+          setMode(null);
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    window.addEventListener('focus', checkCurrentMode);
+    const onVisibilityChange = () => {
+      if (!document.hidden) {
+        checkCurrentMode();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    return () => {
+      try {
+        removeWebViewModeListener(handleModeChange);
+      } catch {
+        // ignore
+      }
+      window.removeEventListener('focus', checkCurrentMode);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, []);
 
   const startMode = (event: ReactMouseEvent<HTMLButtonElement>) => {

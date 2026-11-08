@@ -335,33 +335,37 @@ function RatingGamePlayStage({
 
         <div className="carousel-image-frame">
           {current?.imageUrl ? (
-            <img
-              src={current.imageUrl}
-              alt=""
-              className="carousel-main-image"
-              onClick={() => setExpandedImage(current.imageUrl ?? null)}
-            />
+            <>
+              <img
+                src={current.imageUrl}
+                alt=""
+                className="carousel-main-image"
+                onClick={() => setExpandedImage(current.imageUrl ?? null)}
+              />
+              <button
+                type="button"
+                className="carousel-expand-btn"
+                onClick={() => setExpandedImage(current.imageUrl ?? null)}
+                title="View full image"
+              >
+                ⛶ Full image
+              </button>
+              {current?.text && current.text.trim().length > 0 && (
+                <div className="carousel-caption-overlay">
+                  <span>{current.text}</span>
+                </div>
+              )}
+            </>
+          ) : current?.text && current.text.trim().length > 0 ? (
+            <div className="carousel-text-slide">
+              <div className="carousel-text-content">
+                <p className="carousel-slide-text">{current.text}</p>
+              </div>
+            </div>
           ) : (
             <div className="carousel-no-image">
               <span className="no-image-icon">📷</span>
               <p>No image attached</p>
-            </div>
-          )}
-
-          {current?.imageUrl && (
-            <button
-              type="button"
-              className="carousel-expand-btn"
-              onClick={() => setExpandedImage(current.imageUrl ?? null)}
-              title="View full image"
-            >
-              ⛶ Full image
-            </button>
-          )}
-
-          {total > 1 && (
-            <div className="carousel-indicator-pill">
-              {currentIndex + 1} / {total}
             </div>
           )}
         </div>
@@ -377,11 +381,6 @@ function RatingGamePlayStage({
           </button>
         )}
       </div>
-
-      {/* Item label if provided */}
-      {current?.text && current.text.trim().length > 0 && (
-        <strong className="carousel-item-caption">{current.text}</strong>
-      )}
 
       {/* Single Rating Controls Card */}
       <div className="rating-controls-card">

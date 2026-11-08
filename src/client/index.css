@@ -674,15 +674,15 @@ html.setup-no-scroll,body.setup-no-scroll,body.setup-no-scroll #root{height:100%
   align-items:center!important;
   justify-content:space-between!important;
   width:100%!important;
-  margin:6px 4px 12px!important;
+  margin:2px 2px 6px!important;
   flex:none!important;
-  padding:0 4px 0 2px!important;
+  padding:0 2px!important;
   box-sizing:border-box!important;
 }
 @media(max-width:600px){
   .game-title-row,
   .rating-title-row{
-    margin:4px 4px 10px!important;
+    margin:2px 2px 4px!important;
     padding:0 2px!important;
   }
 }
@@ -1523,15 +1523,25 @@ html.setup-no-scroll,body.setup-no-scroll,body.setup-no-scroll #root{height:100%
 /* Bulletproof Image Stage Container */
 .rating-carousel-card {
   width: 100%;
-  display: flex;
-  flex-direction: column;
+  height: 100% !important;
+  max-height: 100% !important;
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: space-between !important;
+  gap: 6px !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
 }
 
 .rating-stage-container {
   position: relative;
   width: 100%;
-  height: 380px;
-  min-height: 320px;
+  flex: 1 1 0 !important;
+  min-height: 140px !important;
+  height: 0 !important;
+  max-height: none !important;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1539,15 +1549,8 @@ html.setup-no-scroll,body.setup-no-scroll,body.setup-no-scroll #root{height:100%
   border: 1px solid #232c3d;
   border-radius: 14px;
   overflow: hidden;
-  margin: 10px 0 16px 0;
+  margin: 0 !important;
   user-select: none;
-}
-
-@media (max-width: 600px) {
-  .rating-stage-container {
-    height: 310px;
-    min-height: 280px;
-  }
 }
 
 .carousel-image-frame {
@@ -1583,6 +1586,62 @@ html.setup-no-scroll,body.setup-no-scroll,body.setup-no-scroll #root{height:100%
 .no-image-icon {
   font-size: 32px;
   opacity: 0.7;
+}
+
+/* Text Slide (When text exists with no image) */
+.carousel-text-slide {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 54px;
+  box-sizing: border-box;
+  background: radial-gradient(circle at center, #172033 0%, #090c12 100%);
+}
+
+.carousel-text-content {
+  max-width: 90%;
+  max-height: 90%;
+  overflow-y: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.carousel-slide-text {
+  font-size: clamp(20px, 4vw, 32px);
+  font-weight: 800;
+  color: #ffffff;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  word-break: break-word;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.7);
+  margin: 0;
+}
+
+.carousel-caption-overlay {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(10, 14, 22, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #f1f5f9;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 12px;
+  border-radius: 16px;
+  max-width: 70%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
 }
 
 /* Side Navigation Buttons (Vertically Centered Always) */
@@ -1642,20 +1701,7 @@ html.setup-no-scroll,body.setup-no-scroll,body.setup-no-scroll #root{height:100%
   }
 }
 
-.carousel-indicator-pill {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  background: rgba(0, 0, 0, 0.75);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  color: #f1f5f9;
-  font-size: 11px;
-  font-weight: 700;
-  padding: 3px 8px;
-  border-radius: 6px;
-  z-index: 10;
-  letter-spacing: 0.04em;
-}
+
 
 .carousel-expand-btn {
   position: absolute;
