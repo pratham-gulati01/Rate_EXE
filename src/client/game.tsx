@@ -467,7 +467,7 @@ function YourResultsView({
   commented: boolean;
   commenting: boolean;
 }) {
-  const images = challenge.entries.map((e) => e.imageUrl).filter((url): url is string => Boolean(url));
+  const entries = challenge.entries ?? [];
 
   return (
     <div className="results-card personal-results">
@@ -476,21 +476,32 @@ function YourResultsView({
         <div>
           <span className="eyebrow">RATING LOCKED IN</span>
           <h2>Your Verdict</h2>
-          <p className="results-option">{challenge.title}</p>
         </div>
       </div>
 
       <div className="your-rating-hero-badge">
-        <span className="star-icon">⭐</span>
+        <span className="star-icon" aria-hidden="true">⭐</span>
         <strong className="your-score-big">{userRating ?? 7}</strong>
         <span className="your-score-out-of">/ 10</span>
       </div>
 
-      {/* Image Thumbnail Preview Strip */}
-      {images.length > 0 && (
-        <div className="your-verdict-image-strip">
-          {images.map((url, idx) => (
-            <img key={idx} src={url} alt="" className="verdict-mini-thumb" />
+      {/* Image Thumbnail Preview Gallery - Preserving all rated thumbnails in original order */}
+      {entries.length > 0 && (
+        <div className="your-verdict-gallery" role="group" aria-label="Rated post items">
+          {entries.map((entry, idx) => (
+            <div key={entry.id || idx} className="verdict-thumb-slot">
+              {entry.imageUrl ? (
+                <img
+                  src={entry.imageUrl}
+                  alt={entry.text ? entry.text : `Slide ${idx + 1}`}
+                  className="verdict-thumb-img"
+                />
+              ) : (
+                <div className="verdict-thumb-text-fallback">
+                  <span>{entry.text ? entry.text : `Item ${idx + 1}`}</span>
+                </div>
+              )}
+            </div>
           ))}
         </div>
       )}
@@ -498,7 +509,7 @@ function YourResultsView({
       <div className="comment-cta-row">
         <button
           type="button"
-          className="completion-primary-cta"
+          className="completion-primary-cta verdict-comment-cta"
           disabled={commenting || commented}
           onClick={onPostComment}
         >
@@ -511,10 +522,9 @@ function YourResultsView({
 
 // Community Results View (1-Time Rating Distribution)
 function CommunityResultsView({
-  challenge,
   results,
 }: {
-  challenge: Challenge;
+  challenge?: Challenge;
   results: { totalVotes: number; average: number; topScore: number; stats: Record<string, string> } | null;
 }) {
   const total = results?.totalVotes ?? 0;
@@ -528,19 +538,24 @@ function CommunityResultsView({
         <div>
           <span className="eyebrow">COMMUNITY VERDICT</span>
           <h2>Results</h2>
-          <p className="results-option">{challenge.title}</p>
         </div>
       </div>
 
       {total > 0 ? (
         <>
           <div className="community-winner-banner" role="status">
-            <span className="winner-icon" aria-hidden="true">
-              ★
+            <div className="community-banner-left">
+              <span className="winner-icon" aria-hidden="true">
+                ★
+              </span>
+              <div className="community-score-lead">
+                <strong className="community-avg-num">{average.toFixed(1)}</strong>
+                <span className="community-avg-max">/ 10</span>
+              </div>
+            </div>
+            <span className="community-total-pill">
+              {total} {total === 1 ? 'rating' : 'ratings'}
             </span>
-            <p>
-              Average: <b>★ {average.toFixed(1)} / 10</b> across <b>{total}</b> rating{total === 1 ? '' : 's'}
-            </p>
           </div>
 
           {/* 10-Bar Community Distribution Chart */}
@@ -564,7 +579,7 @@ function CommunityResultsView({
       ) : (
         <div className="empty-state">
           <h3>You're the first to rate!</h3>
-          <p>Community ratings will appear as more Redditors vote on this challenge.</p>
+          <p>Community ratings will appear as more Redditors vote on this post.</p>
         </div>
       )}
     </div>
@@ -587,23 +602,31 @@ function GameBottomBar({
   return (
     <nav className="game-bottom-bar" aria-label="Rating view controls">
       <button
-        className={`my-rank-control ${tab === 'Your Rating' ? 'selected' : ''}`}
+        type="button"
+        className={`game-nav-tab my-rank-control ${tab === 'Your Rating' ? 'selected' : ''}`}
         onClick={() => setTab('Your Rating')}
       >
-        You
+        <span className="nav-tab-icon" aria-hidden="true">👤</span>
+        <span className="nav-tab-label">You</span>
       </button>
       <button
-        className={`all-rank-control ${tab === 'Community' ? 'selected' : ''}`}
+        type="button"
+        className={`game-nav-tab all-rank-control ${tab === 'Community' ? 'selected' : ''}`}
         onClick={() => setTab('Community')}
       >
-        Community
+        <span className="nav-tab-icon" aria-hidden="true">👥</span>
+        <span className="nav-tab-label">Community</span>
       </button>
       <button
-        className="comment-rank-control"
+        type="button"
+        className={`game-nav-tab comment-rank-control ${commented ? 'commented' : ''}`}
         disabled={commenting || commented}
         onClick={onComment}
       >
-        {commented ? 'Commented ✓' : commenting ? 'Sending…' : 'Comment rating'}
+        <span className="nav-tab-icon" aria-hidden="true">💬</span>
+        <span className="nav-tab-label">
+          {commented ? 'Commented ✓' : commenting ? 'Sending…' : 'Comment rating'}
+        </span>
       </button>
     </nav>
   );
@@ -657,10 +680,10 @@ function GameCompletionModal({
     >
       <div className="completion-modal-card" onClick={(e) => e.stopPropagation()}>
         <div className="completion-modal-badge">
-          <span className="completion-trophy-emoji">🏆</span>
+          <span className="completion-trophy-emoji">❤️</span>
         </div>
         <h2 className="completion-modal-heading">Rating Locked In!</h2>
-        <p className="completion-modal-sub">You rated this challenge ★ {score} / 10</p>
+        <p className="completion-modal-sub">You rated this post ★ {score} / 10</p>
 
         <button
           type="button"
