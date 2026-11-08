@@ -151,7 +151,13 @@ function ArrowMiniIcon() {
 }
 
 export const SetupApp = () => {
-  const [mode, setMode] = useState<'rating' | null>(null);
+  const [mode, setMode] = useState<'rating' | null>(() => {
+    try {
+      return getWebViewMode() === 'expanded' ? 'rating' : null;
+    } catch {
+      return null;
+    }
+  });
   const [title, setTitle] = useState('Rating');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState('Tech & Gaming');
@@ -174,11 +180,15 @@ export const SetupApp = () => {
       .catch(() => undefined);
   }, []);
 
-  // When expanded view is closed, return to "Choose a Mode" screen
+  // Sync mode with webview presentation:
+  // - Expanded mode opens directly into the creation panel (no second click required)
+  // - Closing expanded view returns back to "Choose a Mode" (inline)
   useEffect(() => {
     const handleModeChange = (newMode: 'inline' | 'expanded') => {
       if (newMode === 'inline') {
         setMode(null);
+      } else if (newMode === 'expanded') {
+        setMode('rating');
       }
     };
 
@@ -188,7 +198,7 @@ export const SetupApp = () => {
       console.warn('addWebViewModeListener:', e);
     }
 
-    const checkCurrentMode = () => {
+    const checkInlineMode = () => {
       try {
         if (getWebViewMode() === 'inline') {
           setMode(null);
@@ -198,10 +208,10 @@ export const SetupApp = () => {
       }
     };
 
-    window.addEventListener('focus', checkCurrentMode);
+    window.addEventListener('focus', checkInlineMode);
     const onVisibilityChange = () => {
       if (!document.hidden) {
-        checkCurrentMode();
+        checkInlineMode();
       }
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
@@ -212,7 +222,7 @@ export const SetupApp = () => {
       } catch {
         // ignore
       }
-      window.removeEventListener('focus', checkCurrentMode);
+      window.removeEventListener('focus', checkInlineMode);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, []);
