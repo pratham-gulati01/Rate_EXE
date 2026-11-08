@@ -1,16 +1,13 @@
 import './index.css';
-import { useState, useRef } from 'react';
-import type { CSSProperties, ChangeEvent, DragEvent } from 'react';
-import { navigateTo } from '@devvit/web/client';
-import type { ChallengeEntry } from '../shared/game';
+import { useEffect, useState } from 'react';
+import type { CSSProperties, MouseEvent as ReactMouseEvent } from 'react';
+import { exitExpandedMode, getWebViewMode, navigateTo, requestExpandedMode } from '@devvit/web/client';
+import { isVideoUrl } from '../shared/game';
+import type { Challenge, ChallengeEntry } from '../shared/game';
 
 type API<T> = T & { error?: string };
-
 const request = async <T,>(url: string, init?: RequestInit): Promise<API<T>> => {
-  const response = await fetch(url, {
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
-  });
+  const response = await fetch(url, { ...init, headers: { 'Content-Type': 'application/json', ...init?.headers } });
   const data = (await response.json()) as API<T>;
   if (!response.ok) throw new Error(data.error ?? 'Something went wrong. Try again.');
   return data;
@@ -18,42 +15,48 @@ const request = async <T,>(url: string, init?: RequestInit): Promise<API<T>> => 
 
 const makeId = () => Math.random().toString(36).slice(2, 9);
 
+const isGifFile = (file: File) =>
+  file.type === 'image/gif' || file.type === 'image/x-gif' || /\.gif$/i.test(file.name);
+
+const isAviFile = (file: File) =>
+  /\.avi$/i.test(file.name) || ['video/x-msvideo', 'video/avi', 'video/msvideo'].includes(file.type);
+
+const isAvifFile = (file: File) =>
+  /\.avif$/i.test(file.name) || file.type === 'image/avif';
+
 const prepareImage = async (file: File): Promise<string> => {
-  if (file.type === 'image/gif' || file.type.startsWith('video/')) {
+  if (isGifFile(file) || isAviFile(file)) {
     return await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
-      reader.onerror = () => reject(new Error(`Could not read ${file.name}`));
-      reader.onload = () => (typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Read failed')));
+      reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+      reader.onload = () => (typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error(`Could not read ${file.name}.`)));
       reader.readAsDataURL(file);
     });
   }
-
   try {
     const bitmap = await createImageBitmap(file);
     const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(1, Math.round(bitmap.width * scale));
     canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-    const ctx = canvas.getContext('2d');
-    ctx?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     bitmap.close();
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/webp', 0.85));
-    if (blob) {
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/webp', 0.82));
+    if (blob && blob.size < file.size) {
       return await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
-        reader.onerror = () => reject(new Error(`Could not prepare ${file.name}`));
-        reader.onload = () => (typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Failed')));
+        reader.onerror = () => reject(new Error(`Could not prepare ${file.name}.`));
+        reader.onload = () => (typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error(`Could not prepare ${file.name}.`)));
         reader.readAsDataURL(blob);
       });
     }
   } catch {
     /* Fallback */
   }
-
   return await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error(`Could not read ${file.name}`));
-    reader.onload = () => (typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Read failed')));
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+    reader.onload = () => (typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error(`Could not read ${file.name}.`)));
     reader.readAsDataURL(file);
   });
 };
@@ -61,163 +64,422 @@ const prepareImage = async (file: File): Promise<string> => {
 const themePresets = [
   { name: 'Blue', value: '#4979D0' },
   { name: 'Violet', value: '#8B5CF6' },
-  { name: 'Amber', value: '#F59E0B' },
-  { name: 'Emerald', value: '#10B981' },
-  { name: 'Rose', value: '#F43F5E' },
+  { name: 'Teal', value: '#0F9F9A' },
+  { name: 'Orange', value: '#E8753D' },
+  { name: 'Rose', value: '#E34D83' },
+  { name: 'Green', value: '#49A66A' },
 ];
 
-export const SetupApp = ({ onPreviewDemo }: { onPreviewDemo?: () => void }) => {
-  const [title, setTitle] = useState('');
+function PaletteIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="13.5" cy="6.5" r=".75" fill="currentColor" />
+      <circle cx="17.5" cy="10.5" r=".75" fill="currentColor" />
+      <circle cx="8.5" cy="7.5" r=".75" fill="currentColor" />
+      <circle cx="6.5" cy="12.5" r=".75" fill="currentColor" />
+      <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.563-2.512 5.563-5.563C22 6.5 17.5 2 12 2z" />
+    </svg>
+  );
+}
+
+function MediaUploadIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+      <circle cx="8.5" cy="8.5" r="1.5" />
+      <polyline points="21 15 16 10 5 21" />
+    </svg>
+  );
+}
+
+function TextCardIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="4 7 4 4 20 4 20 7" />
+      <line x1="9" y1="20" x2="15" y2="20" />
+      <line x1="12" y1="4" x2="12" y2="20" />
+    </svg>
+  );
+}
+
+function BulkAddIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="8" y1="6" x2="21" y2="6" />
+      <line x1="8" y1="12" x2="21" y2="12" />
+      <line x1="8" y1="18" x2="21" y2="18" />
+      <line x1="3" y1="6" x2="3.01" y2="6" />
+      <line x1="3" y1="12" x2="3.01" y2="12" />
+      <line x1="3" y1="18" x2="3.01" y2="18" />
+    </svg>
+  );
+}
+
+function PhotoAttachmentIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+      <circle cx="9" cy="9" r="1.5" />
+      <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  );
+}
+
+function ArrowMiniIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="9 18 15 12 9 6" />
+    </svg>
+  );
+}
+
+export const SetupApp = () => {
+  const [mode, setMode] = useState<'rating' | null>(null);
+  const [title, setTitle] = useState('Rating');
   const [description, setDescription] = useState('');
-  const [category, setCategory] = useState('Tech & Gaming');
-  const [entries, setEntries] = useState<ChallengeEntry[]>([]);
+  const [category, setCategory] = useState('Gaming');
+  const [entries, setEntries] = useState<ChallengeEntry[]>([{ id: makeId(), text: '' }]);
+  const [draftId, setDraftId] = useState('');
+  const [themeExpanded, setThemeExpanded] = useState(false);
+  const [themeEnabled, setThemeEnabled] = useState(false);
   const [themeColor, setThemeColor] = useState('#4979D0');
+  const [drafts, setDrafts] = useState<Challenge[]>([]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
-  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [uploadStatus, setUploadStatus] = useState('');
+  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number; active: number } | null>(null);
 
-  const handleFiles = async (files: FileList | File[]) => {
-    const fileArray = Array.from(files).filter(
-      (f) => f.type.startsWith('image/') || f.type.startsWith('video/')
-    );
-    if (fileArray.length === 0) {
-      setNotice('Please select valid image files.');
+  const maxEntries = 30;
+
+  useEffect(() => {
+    void request<{ drafts: Challenge[] }>('/api/drafts')
+      .then((data) => setDrafts(data.drafts))
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (!mode) {
+      document.documentElement.classList.add('setup-no-scroll');
+      document.body.classList.add('setup-no-scroll');
+      document.documentElement.classList.remove('setup-editor-active');
+      document.body.classList.remove('setup-editor-active');
+      document.documentElement.style.overflow = 'hidden';
+      document.body.style.overflow = 'hidden';
+      document.body.style.touchAction = 'pan-y';
+    } else {
+      document.documentElement.classList.remove('setup-no-scroll');
+      document.body.classList.remove('setup-no-scroll');
+      document.documentElement.classList.add('setup-editor-active');
+      document.body.classList.add('setup-editor-active');
+      document.documentElement.style.overflow = 'auto';
+      document.body.style.overflow = 'auto';
+      document.body.style.touchAction = 'pan-y';
+    }
+    return () => {
+      document.documentElement.classList.remove('setup-no-scroll', 'setup-editor-active');
+      document.body.classList.remove('setup-no-scroll', 'setup-editor-active');
+      document.documentElement.style.overflow = '';
+      document.body.style.overflow = '';
+      document.body.style.touchAction = '';
+    };
+  }, [mode]);
+
+  const startMode = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    try {
+      requestExpandedMode(event.nativeEvent, 'setup', { title: 'RATE.EXE — Create a game' });
+    } catch (e) {
+      console.warn('requestExpandedMode fallback:', e);
+    }
+    setMode('rating');
+    setTitle('Rating');
+    setNotice('');
+  };
+
+  const loadDraft = (draft: Challenge) => {
+    setDraftId(draft.id);
+    setMode('rating');
+    setTitle(draft.title || 'Rating');
+    setDescription(draft.description || '');
+    setCategory(draft.category || 'Gaming');
+    setThemeEnabled(Boolean(draft.themeColor));
+    setThemeColor(draft.themeColor ?? '#4979D0');
+    setEntries(draft.entries.length ? draft.entries : [{ id: makeId(), text: '' }]);
+    setNotice('Draft loaded.');
+  };
+
+  const updateEntry = (entryId: string, patch: Partial<ChallengeEntry>) =>
+    setEntries((current) => current.map((entry) => (entry.id === entryId ? { ...entry, ...patch } : entry)));
+
+  // Batch Image Upload (Leaves text blank by default!)
+  const uploadImages = async (selected: FileList | null) => {
+    const files = Array.from(selected ?? []);
+    if (!files.length) return;
+    const allowed = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/x-gif', 'image/avif', 'video/x-msvideo', 'video/avi', 'video/msvideo', 'video/mp4'];
+    const isAllowed = (file: File) => allowed.includes(file.type) || isGifFile(file) || isAviFile(file) || isAvifFile(file) || /\.(png|jpe?g|webp|gif|avif|avi|mp4)$/i.test(file.name);
+    if (files.some((file) => !isAllowed(file))) {
+      setNotice('Choose PNG, JPEG, WEBP, GIF, AVIF, or AVI files.');
+      return;
+    }
+    if (files.some((file) => file.size > 20 * 1024 * 1024)) {
+      setNotice('Choose images under 20 MB each.');
       return;
     }
 
-    if (entries.length + fileArray.length > 30) {
-      setNotice('Maximum 30 images per rating challenge.');
+    const available = maxEntries - completeEntries.length;
+    const toUpload = files.slice(0, Math.max(available, 0));
+    if (!toUpload.length) {
+      setNotice(`This game already has ${maxEntries} items.`);
       return;
     }
 
     setBusy(true);
-    setUploadProgress(`Preparing ${fileArray.length} image${fileArray.length === 1 ? '' : 's'}…`);
+    setUploadStatus('Preparing selected images…');
+    setUploadProgress({ done: 0, total: toUpload.length, active: 0 });
+    setNotice('');
 
     try {
-      const preparedUrls = await Promise.all(fileArray.map((file) => prepareImage(file)));
-      setUploadProgress(`Uploading to Reddit CDN…`);
+      const imageUrls: string[] = Array(toUpload.length);
+      let nextIndex = 0;
+      let uploaded = 0;
+      let activeUploads = 0;
 
-      const uploadResult = await request<{ imageUrls: string[] }>('/api/media', {
-        method: 'POST',
-        body: JSON.stringify({ dataUrls: preparedUrls }),
-      });
+      await Promise.all(
+        Array.from({ length: Math.min(3, toUpload.length) }, async () => {
+          while (nextIndex < toUpload.length) {
+            const index = nextIndex++;
+            const file = toUpload[index];
+            if (!file) continue;
+            setUploadStatus(`Preparing image ${index + 1} of ${toUpload.length}…`);
+            try {
+              const dataUrl = await prepareImage(file);
+              activeUploads += 1;
+              setUploadStatus('Uploading images…');
+              setUploadProgress({ done: uploaded, total: toUpload.length, active: activeUploads });
+              const mediaType = isAviFile(file) ? 'video' : isGifFile(file) ? 'gif' : 'image';
+              const result = await request<{ imageUrl: string }>('/api/media', {
+                method: 'POST',
+                body: JSON.stringify({ dataUrl, type: mediaType }),
+              });
+              imageUrls[index] = result.imageUrl;
+            } catch (err) {
+              console.error(`Upload failed for ${file.name}`, err);
+            } finally {
+              uploaded += 1;
+              activeUploads = Math.max(0, activeUploads - 1);
+              setUploadProgress({ done: uploaded, total: toUpload.length, active: activeUploads });
+            }
+          }
+        })
+      );
 
-      const newEntries: ChallengeEntry[] = uploadResult.imageUrls.map((url) => ({
+      const successfulImages = toUpload
+        .map((file, index) => ({ file, url: imageUrls[index] }))
+        .filter((item): item is { file: File; url: string } => Boolean(item.url));
+
+      if (successfulImages.length === 0) {
+        throw new Error('Upload failed. Try a smaller image or GIF.');
+      }
+
+      // Keep text completely blank as requested
+      const incoming = successfulImages.map(({ url }) => ({
         id: makeId(),
+        text: '', // Kept blank!
         imageUrl: url,
-        text: '', // Keep blank by default per user request
       }));
 
-      setEntries((prev) => [...prev, ...newEntries]);
-      setNotice(`Added ${newEntries.length} image${newEntries.length === 1 ? '' : 's'} successfully!`);
-    } catch (err) {
-      setNotice(err instanceof Error ? err.message : 'Upload failed.');
-    } finally {
-      setBusy(false);
-      setUploadProgress(null);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  };
-
-  const onFileInputChange = (e: ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      void handleFiles(e.target.files);
-    }
-  };
-
-  const onDragOver = (e: DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  };
-
-  const onDragLeave = () => {
-    setIsDragging(false);
-  };
-
-  const onDrop = (e: DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      void handleFiles(e.dataTransfer.files);
-    }
-  };
-
-  const removeEntry = (id: string) => {
-    setEntries((prev) => prev.filter((item) => item.id !== id));
-  };
-
-  const moveEntry = (index: number, direction: -1 | 1) => {
-    const target = index + direction;
-    if (target < 0 || target >= entries.length) return;
-    setEntries((prev) => {
-      const copy = [...prev];
-      const item = copy[index]!;
-      copy[index] = copy[target]!;
-      copy[target] = item;
-      return copy;
-    });
-  };
-
-  const updateEntryText = (id: string, text: string) => {
-    setEntries((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, text } : item))
-    );
-  };
-
-  const publishChallenge = async () => {
-    if (!title.trim()) {
-      setNotice('Please enter a game title.');
-      return;
-    }
-    if (entries.length === 0) {
-      setNotice('Please upload at least 1 image to rate.');
-      return;
-    }
-
-    setBusy(true);
-    setNotice('Publishing your RATE.EXE challenge to Reddit…');
-
-    try {
-      const res = await request<{ postUrl: string }>('/api/publish', {
-        method: 'POST',
-        body: JSON.stringify({
-          title: title.trim(),
-          description: description.trim(),
-          category,
-          themeColor,
-          entries,
-        }),
+      setEntries((current) => {
+        const next = [...current];
+        for (const image of incoming) {
+          const emptyIndex = next.findIndex((entry) => !(entry.text ?? '').trim() && !entry.imageUrl?.trim());
+          if (emptyIndex >= 0) next[emptyIndex] = { ...image, id: next[emptyIndex]?.id ?? image.id };
+          else if (next.length < maxEntries) next.push(image);
+        }
+        return next;
       });
 
-      setNotice('Published! Redirecting to post…');
-      navigateTo(res.postUrl);
-    } catch (err) {
-      setNotice(err instanceof Error ? err.message : 'Failed to publish.');
+      setNotice(`${incoming.length} image${incoming.length === 1 ? '' : 's'} uploaded.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Image upload failed.');
+    } finally {
+      setBusy(false);
+      setUploadStatus('');
+      setUploadProgress(null);
+    }
+  };
+
+  // Single Item Attachment
+  const uploadSingleImage = async (entryId: string, file: File) => {
+    const allowed = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/x-gif', 'image/avif', 'video/x-msvideo', 'video/avi', 'video/msvideo', 'video/mp4'];
+    const isAllowed = allowed.includes(file.type) || isGifFile(file) || isAviFile(file) || isAvifFile(file) || /\.(png|jpe?g|webp|gif|avif|avi|mp4)$/i.test(file.name);
+    if (!isAllowed) {
+      setNotice('Choose PNG, JPEG, WEBP, GIF, AVIF, or AVI files.');
+      return;
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      setNotice('Choose media under 20 MB.');
+      return;
+    }
+    setBusy(true);
+    setNotice('Uploading media…');
+    try {
+      const dataUrl = await prepareImage(file);
+      const mediaType = isAviFile(file) ? 'video' : isGifFile(file) ? 'gif' : 'image';
+      const result = await request<{ imageUrl: string }>('/api/media', {
+        method: 'POST',
+        body: JSON.stringify({ dataUrl, type: mediaType }),
+      });
+      // Do not overwrite text with filename; keep current text or leave blank
+      setEntries((current) =>
+        current.map((entry) => (entry.id === entryId ? { ...entry, imageUrl: result.imageUrl } : entry))
+      );
+      setNotice('Media attached.');
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Media upload failed.');
     } finally {
       setBusy(false);
     }
   };
 
+  const completeEntries = entries.filter((entry) => (entry.text ?? '').trim() || entry.imageUrl?.trim());
+  const validCount = completeEntries.length >= 1;
+
+  const saveDraft = async () => {
+    setBusy(true);
+    try {
+      const result = await request<{ draft: Challenge }>('/api/drafts', {
+        method: 'POST',
+        body: JSON.stringify({ draftId, title, description, category, mode: 'rating', ...(themeEnabled ? { themeColor } : {}), entries }),
+      });
+      setDraftId(result.draft.id);
+      setDrafts((all) => [result.draft, ...all.filter((draft) => draft.id !== result.draft.id)]);
+      setNotice('Draft saved.');
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not save draft.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const publish = async () => {
+    if (!title.trim() || !validCount) {
+      return setNotice(!title.trim() ? 'Give your game a title.' : 'Add at least 1 image/entry to publish.');
+    }
+    setBusy(true);
+    setNotice('Publishing your game post…');
+    try {
+      const result = await request<{ postUrl: string }>('/api/publish', {
+        method: 'POST',
+        body: JSON.stringify({
+          title,
+          description,
+          category,
+          mode: 'rating',
+          ...(themeEnabled ? { themeColor } : {}),
+          entries: completeEntries,
+        }),
+      });
+      navigateTo(result.postUrl);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not publish the game post.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // SCREEN 1: Choose a Mode (Image 3)
+  if (!mode) {
+    return (
+      <main className="setup-shell setup-mode-shell">
+        <header className="setup-brand">
+          <span className="brand-mark">R</span>
+          <span>
+            RATE<span className="accent">.EXE</span>
+          </span>
+          <span className="setup-label">GAME SETUP</span>
+        </header>
+
+        {notice && (
+          <div className="notice" role="status">
+            {notice}
+          </div>
+        )}
+
+        <section className="mode-select">
+          <div className="eyebrow">BUILD A NEW GAME</div>
+          <h1>Choose a Mode</h1>
+          <p>Select the game type for your post</p>
+
+          <div className="mode-list" style={{ gridTemplateColumns: 'minmax(0, 1fr)' }}>
+            <button
+              type="button"
+              className="mode-option"
+              onClick={startMode}
+            >
+              <div className="mode-option-head">
+                <div className="mode-option-title-group">
+                  <span className="mode-icon">★</span>
+                  <b className="mode-title">Rating</b>
+                </div>
+                <span className="mode-check-badge" aria-hidden="true">
+                  <ArrowMiniIcon />
+                </span>
+              </div>
+              <small className="mode-desc">
+                Score each entry from 1 to 10 with an interactive slider.
+              </small>
+            </button>
+          </div>
+
+          {drafts.length > 0 && (
+            <details className="load-drafts">
+              <summary>Continue a saved draft</summary>
+              <div>
+                {drafts.map((draft) => (
+                  <button key={draft.id} onClick={() => loadDraft(draft)}>
+                    {draft.title}
+                  </button>
+                ))}
+              </div>
+            </details>
+          )}
+        </section>
+      </main>
+    );
+  }
+
+  // SCREEN 2: Expanded View for Making the Game (Images 1 & 2)
+  const statusText =
+    completeEntries.length < 1
+      ? `${completeEntries.length} of 1 minimum entry`
+      : `${completeEntries.length} ${completeEntries.length === 1 ? 'item' : 'items'} ready`;
+
   return (
-    <main className="setup-shell setup-editor-shell" style={{ '--game-accent': themeColor } as CSSProperties}>
+    <main className="setup-shell setup-editor-shell">
+      {/* Header */}
       <header className="setup-brand">
-        <span className="brand-mark">R</span>
+        <button
+          type="button"
+          className="setup-back-btn"
+          onClick={(event) => {
+            setMode(null);
+            if (getWebViewMode() === 'expanded') exitExpandedMode(event.nativeEvent);
+          }}
+        >
+          ← Back
+        </button>
         <span className="setup-brand-title">
           RATE<span className="accent">.EXE</span>
         </span>
-        <span className="setup-mode-tag">CREATION PANEL</span>
-        {onPreviewDemo && (
-          <button
-            type="button"
-            className="preview-demo-btn"
-            onClick={onPreviewDemo}
-            title="Preview demo rating game"
-          >
-            Demo Preview
-          </button>
-        )}
+        <span className="setup-mode-tag">RATING</span>
       </header>
 
       <div className="setup-content">
@@ -230,178 +492,382 @@ export const SetupApp = ({ onPreviewDemo }: { onPreviewDemo?: () => void }) => {
           </div>
         )}
 
+        {/* Title & Description Heading */}
         <div className="setup-heading">
-          <h1>Create Rating Challenge</h1>
-          <p className="setup-subhead">
-            Upload images for your community to evaluate and rate on a scale from 1 to 10.
-          </p>
+          <h1>Create your game</h1>
+          <p className="setup-subhead">Set up your items and challenge your community.</p>
         </div>
 
-        {/* Game Title */}
-        <div className="setup-section">
-          <h2>Challenge Details</h2>
-          <label>
-            GAME TITLE <span className="required">*</span>
-            <input
-              type="text"
-              className="setup-text-input"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Rate our Cyberpunk Battlestations 🔥"
-              maxLength={80}
-            />
+        {/* Game Title Field */}
+        <div className="setup-field-group">
+          <label className="setup-field-label" htmlFor="game-title-input">
+            GAME TITLE
           </label>
+          <input
+            id="game-title-input"
+            className="setup-text-input"
+            value={title}
+            maxLength={80}
+            placeholder="Rating"
+            onChange={(event) => setTitle(event.target.value)}
+          />
+        </div>
 
-          <label>
-            PROMPT / DESCRIPTION <span className="optional">OPTIONAL</span>
-            <textarea
-              className="setup-textarea"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Give context or instructions for your community..."
-              maxLength={300}
-            />
-          </label>
-
-          <div className="setup-row-two">
-            <label>
-              CATEGORY
-              <select value={category} onChange={(e) => setCategory(e.target.value)}>
-                <option value="Tech & Gaming">Tech & Gaming</option>
-                <option value="Pop Culture">Pop Culture</option>
-                <option value="Setups & Battlestations">Setups & Battlestations</option>
-                <option value="Fashion & Fits">Fashion & Fits</option>
-                <option value="Art & Design">Art & Design</option>
-                <option value="Food & Cooking">Food & Cooking</option>
-                <option value="General">General</option>
-              </select>
-            </label>
-
-            <label>
-              ACCENT THEME
-              <div className="theme-preset-pills">
-                {themePresets.map((preset) => (
-                  <button
-                    key={preset.value}
-                    type="button"
-                    className={`theme-pill ${themeColor === preset.value ? 'selected' : ''}`}
-                    style={{ backgroundColor: preset.value }}
-                    onClick={() => setThemeColor(preset.value)}
-                    title={preset.name}
-                  />
+        {/* Optional details (Description & Category) */}
+        <details className="setup-details-accordion">
+          <summary>
+            <span>Optional details (description, category)</span>
+            <span className="accordion-chevron">›</span>
+          </summary>
+          <div className="setup-details-body">
+            <div className="setup-field-group">
+              <label className="setup-field-label" htmlFor="game-desc-input">
+                DESCRIPTION
+              </label>
+              <textarea
+                id="game-desc-input"
+                className="setup-textarea"
+                value={description}
+                maxLength={500}
+                placeholder="Give players context about this game…"
+                onChange={(event) => setDescription(event.target.value)}
+              />
+            </div>
+            <div className="setup-field-group">
+              <label className="setup-field-label" htmlFor="game-category-select">
+                CATEGORY
+              </label>
+              <select
+                id="game-category-select"
+                className="setup-select"
+                value={category}
+                onChange={(event) => setCategory(event.target.value)}
+              >
+                {['Tech & Gaming', 'Pop culture', 'Food', 'Gaming', 'Music', 'Sports', 'Everyday life', 'Other'].map((item) => (
+                  <option key={item}>{item}</option>
                 ))}
+              </select>
+            </div>
+          </div>
+        </details>
+
+        {/* Game Appearance (Custom Accent Color) */}
+        <div className="setup-section-block">
+          <div className="setup-section-header">
+            <span className="setup-section-title">Game appearance</span>
+            <span className="setup-badge-optional">Optional</span>
+          </div>
+          <div className="setup-appearance-card">
+            <div
+              className="setup-appearance-row"
+              onClick={() => {
+                const nextExpanded = !themeExpanded;
+                setThemeExpanded(nextExpanded);
+                if (nextExpanded && !themeEnabled) setThemeEnabled(true);
+              }}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  const nextExpanded = !themeExpanded;
+                  setThemeExpanded(nextExpanded);
+                  if (nextExpanded && !themeEnabled) setThemeEnabled(true);
+                }
+              }}
+            >
+              <div className="setup-appearance-info">
+                <strong>Custom accent colour</strong>
+                <span>Personalise your game</span>
               </div>
-            </label>
+              <button
+                type="button"
+                className="setup-palette-btn"
+                style={{ '--palette-accent': themeEnabled ? themeColor : '#4979D0' } as CSSProperties}
+                aria-label="Toggle theme color picker"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const nextExpanded = !themeExpanded;
+                  setThemeExpanded(nextExpanded);
+                  if (nextExpanded && !themeEnabled) setThemeEnabled(true);
+                }}
+              >
+                <PaletteIcon />
+              </button>
+            </div>
+
+            {themeExpanded && (
+              <div className="setup-appearance-expanded">
+                <div className="theme-colors">
+                  <div className="theme-swatches">
+                    {themePresets.map((preset) => (
+                      <button
+                        type="button"
+                        key={preset.value}
+                        className={`theme-swatch ${themeColor === preset.value && themeEnabled ? 'selected' : ''}`}
+                        style={{ '--swatch-color': preset.value } as CSSProperties}
+                        aria-label={`${preset.name} theme`}
+                        aria-pressed={themeColor === preset.value && themeEnabled}
+                        onClick={() => {
+                          setThemeEnabled(true);
+                          setThemeColor(preset.value);
+                        }}
+                      />
+                    ))}
+                  </div>
+                  <label className="theme-custom-color">
+                    Custom
+                    <input
+                      aria-label="Pick a custom theme color"
+                      type="color"
+                      value={themeColor}
+                      onChange={(event) => {
+                        setThemeEnabled(true);
+                        setThemeColor(event.target.value.toUpperCase());
+                      }}
+                    />
+                    <span>{themeColor}</span>
+                  </label>
+                  <button
+                    type="button"
+                    className="setup-theme-reset-link"
+                    onClick={() => {
+                      setThemeEnabled(false);
+                      setThemeExpanded(false);
+                    }}
+                  >
+                    Reset default
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Image Uploader */}
-        <div className="setup-section">
-          <div className="items-heading">
-            <div>
-              <h2>Upload Images ({entries.length}/30)</h2>
-              <p>Add 1 to 30 images. Names are completely optional (leave blank).</p>
-            </div>
+        {/* Add Your Items Header & Toolbar */}
+        <div className="setup-section-block">
+          <div className="setup-section-header">
+            <span className="setup-section-title">Add your items</span>
+            <span className="setup-count-pill">
+              {completeEntries.length} / {maxEntries}
+            </span>
+          </div>
+          <p className="setup-help-text">Add between 1 and {maxEntries} entries to get started.</p>
+
+          <div className="setup-action-toolbar">
+            <label className="setup-toolbar-tile media-tile">
+              <div className="toolbar-icon-wrap">
+                <MediaUploadIcon />
+              </div>
+              <span className="toolbar-title">Media</span>
+              <span className="toolbar-subtitle">Upload</span>
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif,image/avif,video/x-msvideo,video/avi,video/msvideo,video/mp4,video/*,image/*"
+                multiple
+                disabled={busy || completeEntries.length >= maxEntries}
+                onChange={(event) => {
+                  void uploadImages(event.currentTarget.files);
+                  event.currentTarget.value = '';
+                }}
+              />
+            </label>
+
+            <button
+              type="button"
+              className="setup-toolbar-tile text-tile"
+              disabled={busy || entries.length >= maxEntries}
+              onClick={() => setEntries((all) => [...all, { id: makeId(), text: '' }])}
+            >
+              <div className="toolbar-icon-wrap">
+                <TextCardIcon />
+              </div>
+              <span className="toolbar-title">Text</span>
+              <span className="toolbar-subtitle">Add card</span>
+            </button>
+
+            <button
+              type="button"
+              className="setup-toolbar-tile bulk-tile"
+              disabled={busy || entries.length >= maxEntries}
+              onClick={() =>
+                setEntries((all) => [
+                  ...all,
+                  ...Array.from({ length: Math.min(5, maxEntries - all.length) }, () => ({ id: makeId(), text: '' })),
+                ])
+              }
+            >
+              <div className="toolbar-icon-wrap">
+                <BulkAddIcon />
+              </div>
+              <span className="toolbar-title">Bulk</span>
+              <span className="toolbar-subtitle">Add 5</span>
+            </button>
           </div>
 
-          {/* Drag & Drop Upload Zone */}
-          <div
-            className={`uploader-dropzone ${isDragging ? 'dragging' : ''}`}
-            onDragOver={onDragOver}
-            onDragLeave={onDragLeave}
-            onDrop={onDrop}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept="image/*,video/mp4,video/webm"
-              style={{ display: 'none' }}
-              onChange={onFileInputChange}
-            />
-            <span className="dropzone-icon">📷</span>
-            <div className="dropzone-text">
-              <b>{uploadProgress || 'Click to select or drag & drop images'}</b>
-              <small>PNG, JPG, WEBP, GIF (up to 30 images)</small>
-            </div>
-          </div>
-
-          {/* Uploaded Entries List */}
-          {entries.length > 0 && (
-            <div className="uploaded-entries-grid">
-              {entries.map((entry, idx) => (
-                <div className="uploaded-entry-card" key={entry.id}>
-                  <div className="entry-thumb-wrapper">
-                    {idx === 0 && <span className="cover-badge">Cover</span>}
-                    {entry.imageUrl ? (
-                      <img src={entry.imageUrl} alt="" className="entry-thumb-img" />
-                    ) : (
-                      <div className="entry-thumb-placeholder">#{idx + 1}</div>
-                    )}
-                    <span className="entry-order-badge">#{idx + 1}</span>
+          {/* Upload Progress Banner */}
+          {uploadStatus && (
+            <div className="upload-status" role="status">
+              <span className="upload-spinner" />
+              <span className="upload-status-text">{uploadStatus}</span>
+              {uploadProgress && (
+                <>
+                  <b className="upload-progress-count">
+                    {uploadProgress.done}/{uploadProgress.total}
+                    {uploadProgress.active ? ` · ${uploadProgress.active} active` : ''}
+                  </b>
+                  <div className="upload-progress-track">
+                    <span style={{ width: `${(uploadProgress.done / uploadProgress.total) * 100}%` }} />
+                    <i />
                   </div>
+                </>
+              )}
+            </div>
+          )}
 
-                  <div className="entry-meta-inputs">
-                    <input
-                      type="text"
-                      className="entry-name-input"
-                      value={entry.text}
-                      onChange={(e) => updateEntryText(entry.id, e.target.value)}
-                      placeholder="Optional label (leave blank)"
-                      maxLength={60}
-                    />
-                    <div className="entry-actions-row">
+          {/* Entries Subheading */}
+          <div className="setup-sub-header">
+            <span className="setup-entries-title">Your entries</span>
+            <span className="setup-entries-added">{completeEntries.length} added</span>
+          </div>
+
+          {/* Numbered Item Rows */}
+          <div className="setup-entries-list">
+            {entries.map((entry, index) => (
+              <div className="setup-entry-strip" key={entry.id}>
+                <div className="setup-entry-thumb">
+                  {entry.imageUrl ? (
+                    <div className="setup-entry-media-wrap">
+                      {isVideoUrl(entry.imageUrl) ? (
+                        <video src={entry.imageUrl} autoPlay loop muted playsInline />
+                      ) : (
+                        <img
+                          src={entry.imageUrl}
+                          alt=""
+                          onError={(event) => {
+                            event.currentTarget.alt = 'Media error';
+                          }}
+                        />
+                      )}
+                      <span className="setup-thumb-num">{String(index + 1).padStart(2, '0')}</span>
                       <button
                         type="button"
-                        className="entry-btn move-btn"
-                        disabled={idx === 0}
-                        onClick={() => moveEntry(idx, -1)}
-                        title="Move earlier"
-                      >
-                        ‹
-                      </button>
-                      <button
-                        type="button"
-                        className="entry-btn move-btn"
-                        disabled={idx === entries.length - 1}
-                        onClick={() => moveEntry(idx, 1)}
-                        title="Move later"
-                      >
-                        ›
-                      </button>
-                      <button
-                        type="button"
-                        className="entry-btn delete-btn"
-                        onClick={() => removeEntry(entry.id)}
-                        title="Remove image"
+                        className="setup-thumb-remove-btn"
+                        title="Remove media"
+                        onClick={() => updateEntry(entry.id, { imageUrl: '' })}
                       >
                         ✕
                       </button>
                     </div>
-                  </div>
+                  ) : (
+                    <span className="setup-entry-badge-text">{String(index + 1).padStart(2, '0')}</span>
+                  )}
                 </div>
-              ))}
-            </div>
-          )}
+
+                <div className="setup-entry-main">
+                  <input
+                    type="text"
+                    className="setup-entry-input"
+                    value={entry.text}
+                    maxLength={180}
+                    placeholder="Name this item"
+                    onChange={(event) => updateEntry(entry.id, { text: event.target.value })}
+                  />
+
+                  <details className="setup-entry-url-details">
+                    <summary>Image URL</summary>
+                    <input
+                      type="text"
+                      className="setup-entry-url-input"
+                      value={entry.imageUrl ?? ''}
+                      placeholder="https://i.redd.it/…"
+                      onChange={(event) => updateEntry(entry.id, { imageUrl: event.target.value })}
+                    />
+                  </details>
+                </div>
+
+                <div className="setup-entry-actions">
+                  <label className="setup-entry-action-btn media-btn" title={entry.imageUrl ? 'Change media' : 'Attach media'}>
+                    <PhotoAttachmentIcon />
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif,image/avif,video/x-msvideo,video/avi,video/msvideo,video/mp4,video/*,image/*"
+                      disabled={busy}
+                      onChange={(event) => {
+                        const file = event.currentTarget.files?.[0];
+                        if (file) void uploadSingleImage(entry.id, file);
+                        event.currentTarget.value = '';
+                      }}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="setup-entry-action-btn remove-btn"
+                    disabled={entries.length <= 1}
+                    aria-label={`Remove item ${index + 1}`}
+                    onClick={() => setEntries((all) => all.filter((item) => item.id !== entry.id))}
+                  >
+                    <CloseIcon />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Add Another Item Button */}
+          <button
+            type="button"
+            className="setup-add-another-btn"
+            disabled={busy || entries.length >= maxEntries}
+            onClick={() => setEntries((all) => [...all, { id: makeId(), text: '' }])}
+          >
+            ＋ Add another item
+          </button>
+
+          {/* Draft Management Links */}
+          <div className="setup-actions-subrow">
+            <button
+              type="button"
+              className="setup-save-draft-btn"
+              disabled={busy}
+              onClick={() => void saveDraft()}
+            >
+              {busy ? 'Saving draft…' : 'Save as draft'}
+            </button>
+            {drafts.length > 0 && (
+              <select
+                className="setup-draft-select"
+                value={draftId}
+                onChange={(event) => {
+                  const draft = drafts.find((item) => item.id === event.target.value);
+                  if (draft) loadDraft(draft);
+                }}
+              >
+                <option value="">Saved drafts ({drafts.length})…</option>
+                {drafts.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.title}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Sticky Bottom Bar */}
-      <footer className="setup-bottom-bar">
-        <span className="setup-summary-text">
-          {entries.length === 0
-            ? 'Add at least 1 image to publish'
-            : `${entries.length} image${entries.length === 1 ? '' : 's'} ready`}
-        </span>
-
+      {/* Sticky Bottom Publish Bar */}
+      <footer className="setup-publishbar">
+        <div className="setup-publish-info">
+          <strong className="setup-publish-title">{title.trim() || 'Rating'}</strong>
+          <span className="setup-publish-status">{statusText}</span>
+        </div>
         <button
           type="button"
-          className="publish-submit-btn"
-          disabled={busy || !title.trim() || entries.length === 0}
-          onClick={() => void publishChallenge()}
+          className="primary setup-publish-btn"
+          disabled={busy || !title.trim() || !validCount}
+          onClick={() => void publish()}
         >
-          {busy ? 'Publishing…' : 'Publish Rating Game 🚀'}
+          <span>{busy ? 'Publishing…' : 'Publish'}</span>
+          <span className="arrow-icon">→</span>
         </button>
       </footer>
     </main>

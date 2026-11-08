@@ -3,7 +3,7 @@ import { context, media, reddit, redis } from '@devvit/web/server';
 import { randomUUID } from 'node:crypto';
 import { demoChallenge } from '../core/post';
 import { isValidSubmission } from '../../shared/game';
-import type { Challenge, Submission, Session } from '../../shared/game';
+import type { Challenge, ChallengeEntry, Submission, Session } from '../../shared/game';
 
 export const api = new Hono();
 
@@ -72,7 +72,47 @@ api.get('/init', async (c) => {
   });
 });
 
-// 2. Publish New Challenge From Setup Panel
+// 2. Drafts Management
+api.get('/drafts', async (c) => {
+  const user = context.userId;
+  if (!user) return c.json({ drafts: [] });
+  const key = `${prefix()}drafts:${user}`;
+  const raw = await redis.hGetAll(key);
+  await redis.expire(key, identityTtl);
+  const drafts = Object.values(raw).flatMap((value) => {
+    try {
+      return [JSON.parse(value) as Challenge];
+    } catch {
+      return [];
+    }
+  });
+  return c.json({ drafts });
+});
+
+api.post('/drafts', async (c) => {
+  const user = context.userId;
+  if (!user) return c.json({ error: 'Sign in to save a draft.' }, 401);
+  const input = await c.req.json<Record<string, unknown>>();
+  const draftId = String(input.draftId || randomUUID());
+  const draft: Challenge = {
+    id: draftId,
+    title: String(input.title || 'Rating'),
+    description: String(input.description || ''),
+    category: String(input.category || 'General'),
+    mode: 'rating',
+    themeColor: typeof input.themeColor === 'string' ? input.themeColor : '#4979D0',
+    entries: Array.isArray(input.entries) ? (input.entries as ChallengeEntry[]) : [],
+    creator: context.username ?? 'Redditor',
+    createdAt: Date.now(),
+    status: 'draft',
+  };
+  const key = `${prefix()}drafts:${user}`;
+  await redis.hSet(key, { [draftId]: JSON.stringify(draft) });
+  await redis.expire(key, identityTtl);
+  return c.json({ draft });
+});
+
+// 3. Publish New Challenge From Setup Panel
 api.post('/publish', async (c) => {
   const userId = context.userId;
   if (!userId) return c.json({ error: 'Sign in to publish challenge.' }, 401);

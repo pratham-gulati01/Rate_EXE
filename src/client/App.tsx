@@ -70,13 +70,7 @@ export const App = () => {
   }
 
   if (screen === 'setup') {
-    return (
-      <SetupApp
-        onPreviewDemo={() => {
-          setScreen('game');
-        }}
-      />
-    );
+    return <SetupApp />;
   }
 
   if (screen === 'game') {
