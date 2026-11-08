@@ -1,10 +1,9 @@
 import './index.css';
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import type { CSSProperties, TouchEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { navigateTo } from '@devvit/web/client';
-import { isVideoUrl } from '../shared/game';
-import type { Challenge, ChallengeEntry, Session } from '../shared/game';
+import type { Challenge } from '../shared/game';
 
 type API<T> = T & { error?: string };
 
@@ -34,13 +33,17 @@ export const GameApp = ({
   initialSubreddit?: string | undefined;
 } = {}) => {
   const [challenge, setChallenge] = useState<Challenge | null>(initialChallenge ?? null);
-  const [session, setSession] = useState<Session | null>(null);
+  const [userRating, setUserRating] = useState<number | null>(null);
   const [subreddit, setSubreddit] = useState<string>(() =>
     initialSubreddit ?? detectSubreddit(initialChallenge?.subredditName ?? 'Rank_EXE')
   );
-  const [active, setActive] = useState(false);
-  const [tab, setTab] = useState<'Your Choices' | 'Everyone Played'>('Your Choices');
-  const [results, setResults] = useState<{ plays: number; totals: Record<string, string> } | null>(null);
+  const [tab, setTab] = useState<'Your Rating' | 'Community'>('Your Rating');
+  const [results, setResults] = useState<{
+    totalVotes: number;
+    average: number;
+    topScore: number;
+    stats: Record<string, string>;
+  } | null>(null);
   const [loading, setLoading] = useState(!initialChallenge);
   const [notice, setNotice] = useState('');
 
@@ -49,11 +52,14 @@ export const GameApp = ({
       try {
         let targetChallenge = initialChallenge;
         const initData = await fetch('/api/init')
-          .then((r) => r.json() as Promise<API<{ challenge: Challenge | null; subreddit?: string }>>)
+          .then((r) => r.json() as Promise<API<{ challenge: Challenge | null; subreddit?: string; userRating?: number | null }>>)
           .catch(() => null);
 
         if (initData?.subreddit) {
           setSubreddit(initData.subreddit);
+        }
+        if (initData?.userRating) {
+          setUserRating(initData.userRating);
         }
         if (!targetChallenge) {
           if (!initData?.challenge) {
@@ -65,14 +71,6 @@ export const GameApp = ({
             setSubreddit(targetChallenge.subredditName);
           }
         }
-        const result = await request<{ session: Session; subreddit?: string }>(
-          `/api/session/${targetChallenge.id}`
-        );
-        if (result.subreddit) {
-          setSubreddit(result.subreddit);
-        }
-        setSession(result.session);
-        setActive(true);
       } catch (error: unknown) {
         setNotice(error instanceof Error ? error.message : 'Could not load this game post.');
       } finally {
@@ -86,16 +84,18 @@ export const GameApp = ({
   useEffect(() => {
     if (!challengeId) return;
     const fetchResults = () => {
-      void request<{ plays: number; totals: Record<string, string> }>(`/api/results/${challengeId}`)
+      void request<{ totalVotes: number; average: number; topScore: number; stats: Record<string, string> }>(
+        `/api/results/${challengeId}`
+      )
         .then(setResults)
         .catch(() => setResults(null));
     };
     fetchResults();
-    if (tab === 'Everyone Played') {
+    if (tab === 'Community') {
       const interval = setInterval(fetchResults, 3000);
       return () => clearInterval(interval);
     }
-  }, [challengeId, session?.status, tab]);
+  }, [challengeId, userRating, tab]);
 
   return (
     <main
@@ -107,8 +107,9 @@ export const GameApp = ({
         <span>
           RATE<span className="accent">.EXE</span>
         </span>
-        <span className="post-kind">GAME POST</span>
+        <span className="post-kind">RATING GAME</span>
       </header>
+
       {notice && (
         <div className="notice" role="status">
           <span>{notice}</span>
@@ -117,6 +118,7 @@ export const GameApp = ({
           </button>
         </div>
       )}
+
       {loading ? (
         <div className="game-loading-screen" role="status" aria-live="polite">
           <div className="loading-brand">
@@ -131,24 +133,18 @@ export const GameApp = ({
             <i />
           </div>
           <h1>Opening rating game</h1>
-          <p>Loading your challenge…</p>
-          <div className="loading-skeleton">
-            <span />
-            <span />
-            <span />
-          </div>
+          <p>Loading…</p>
         </div>
       ) : challenge ? (
         <PlayView
           challenge={challenge}
-          active={active}
-          session={session}
+          userRating={userRating}
+          setUserRating={setUserRating}
           tab={tab}
           setTab={setTab}
           results={results}
           subreddit={subreddit}
           onNotice={setNotice}
-          onSession={setSession}
         />
       ) : (
         <div className="empty-state">
@@ -162,67 +158,66 @@ export const GameApp = ({
 
 function PlayView({
   challenge,
-  active,
-  session,
+  userRating,
+  setUserRating,
   tab,
   setTab,
   results,
   subreddit,
   onNotice,
-  onSession,
 }: {
   challenge: Challenge;
-  active: boolean;
-  session: Session | null;
-  tab: 'Your Choices' | 'Everyone Played';
-  setTab: (t: 'Your Choices' | 'Everyone Played') => void;
-  results: { plays: number; totals: Record<string, string> } | null;
+  userRating: number | null;
+  setUserRating: (rating: number) => void;
+  tab: 'Your Rating' | 'Community';
+  setTab: (t: 'Your Rating' | 'Community') => void;
+  results: { totalVotes: number; average: number; topScore: number; stats: Record<string, string> } | null;
   subreddit?: string;
   onNotice: (n: string) => void;
-  onSession: (s: Session) => void;
 }) {
-  const completed = session?.status === 'completed';
   const [commenting, setCommenting] = useState(false);
   const [commented, setCommented] = useState(false);
   const [showCompletionModal, setShowCompletionModal] = useState(false);
 
+  const isCompleted = userRating !== null;
+
+  const handleRate = async (score: number) => {
+    try {
+      await request('/api/rate', {
+        method: 'POST',
+        body: JSON.stringify({ challengeId: challenge.id, score }),
+      });
+      setUserRating(score);
+      setShowCompletionModal(true);
+    } catch (err) {
+      onNotice(err instanceof Error ? err.message : 'Could not submit rating.');
+    }
+  };
+
   const postComment = async () => {
     setCommenting(true);
-    const done = await comment(challenge, onNotice);
-    setCommented(done);
-    setCommenting(false);
+    try {
+      await request(`/api/comment/${challenge.id}`, { method: 'POST', body: '{}' });
+      onNotice('Your comment was submitted! 🎉');
+      setCommented(true);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : 'Could not comment.');
+    } finally {
+      setCommenting(false);
+    }
   };
 
   return (
     <section className="play-page">
-      {!active || !session ? null : completed ? (
-        tab === 'Your Choices' ? (
-          <YourResults challenge={challenge} session={session} />
-        ) : (
-          <EveryoneResults challenge={challenge} results={results} />
-        )
+      {!isCompleted ? (
+        <RatingGamePlayStage challenge={challenge} onRate={handleRate} />
+      ) : tab === 'Your Rating' ? (
+        <YourResultsView challenge={challenge} userRating={userRating} onPostComment={postComment} commented={commented} commenting={commenting} />
       ) : (
-        <GameBoard
-          challenge={challenge}
-          session={session}
-          onSession={onSession}
-          onNotice={onNotice}
-          onComplete={async (values) => {
-            onSession({ ...session, values, status: 'completed' });
-            setTab('Your Choices');
-            setShowCompletionModal(true);
-            try {
-              await request(`/api/session/${challenge.id}/complete`, {
-                method: 'POST',
-                body: JSON.stringify({ values }),
-              });
-            } catch (error) {
-              onNotice(error instanceof Error ? error.message : 'Could not submit.');
-            }
-          }}
-        />
+        <CommunityResultsView challenge={challenge} results={results} />
       )}
-      {completed && (
+
+      {isCompleted && (
         <GameBottomBar
           tab={tab}
           setTab={setTab}
@@ -231,11 +226,12 @@ function PlayView({
           onComment={() => void postComment()}
         />
       )}
-      {completed &&
-        showCompletionModal &&
+
+      {showCompletionModal &&
         typeof document !== 'undefined' &&
         createPortal(
           <GameCompletionModal
+            score={userRating ?? 7}
             onClose={() => setShowCompletionModal(false)}
             onComment={() => void postComment()}
             commenting={commenting}
@@ -249,296 +245,32 @@ function PlayView({
   );
 }
 
-function ArrowUpIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <polyline points="18 15 12 9 6 15" />
-    </svg>
-  );
-}
-
-function ArrowDownIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <polyline points="6 9 12 15 18 9" />
-    </svg>
-  );
-}
-
-function scrollPage(direction: -1 | 1) {
-  const list = document.querySelector<HTMLElement>('.results-card .community-list, .results-card .ranking-feed');
-  if (!list) return;
-
-  const maxScroll = Math.max(0, list.scrollHeight - list.clientHeight);
-  if (maxScroll <= 0) return;
-
-  const row = list.querySelector<HTMLElement>('.ranking-feed-row');
-  const step = row ? Math.max(row.offsetHeight + 6, 44) * 1.5 : 75;
-  const target = Math.max(0, Math.min(maxScroll, list.scrollTop + step * direction));
-  list.scrollTo({ top: target, behavior: 'smooth' });
-}
-
-function GameBottomBar({
-  tab,
-  setTab,
-  commenting,
-  commented,
-  onComment,
+// Interactive Carousel Stage & 1-Time Rating Controls
+function RatingGamePlayStage({
+  challenge,
+  onRate,
 }: {
-  tab: 'Your Choices' | 'Everyone Played';
-  setTab: (t: 'Your Choices' | 'Everyone Played') => void;
-  commenting: boolean;
-  commented: boolean;
-  onComment: () => void;
+  challenge: Challenge;
+  onRate: (score: number) => Promise<void> | void;
 }) {
-  return (
-    <nav className="game-bottom-bar" aria-label="Leaderboard controls">
-      <button className="scroll-control" onClick={() => scrollPage(-1)} aria-label="Scroll up">
-        <ArrowUpIcon />
-      </button>
-      <button
-        className={`my-rank-control ${tab === 'Your Choices' ? 'selected' : ''}`}
-        onClick={() => setTab('Your Choices')}
-      >
-        You
-      </button>
-      <button
-        className={`all-rank-control ${tab === 'Everyone Played' ? 'selected' : ''}`}
-        onClick={() => setTab('Everyone Played')}
-      >
-        All
-      </button>
-      <button
-        className="comment-rank-control"
-        disabled={commenting || commented}
-        onClick={onComment}
-      >
-        {commented ? 'Commented ✓' : commenting ? 'Sending…' : 'Comment my ratings'}
-      </button>
-      <button className="scroll-control" onClick={() => scrollPage(1)} aria-label="Scroll down">
-        <ArrowDownIcon />
-      </button>
-    </nav>
-  );
-}
-
-function CommentIcon() {
-  return (
-    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-    </svg>
-  );
-}
-
-function CommunityIcon() {
-  return (
-    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-    </svg>
-  );
-}
-
-function GameCompletionModal({
-  onClose,
-  onComment,
-  commenting,
-  commented,
-  subreddit: initialSubreddit = 'Rank_EXE',
-  onNotice,
-}: {
-  onClose: () => void;
-  onComment: () => Promise<void> | void;
-  commenting: boolean;
-  commented: boolean;
-  subreddit?: string;
-  onNotice: (n: string) => void;
-}) {
-  const [joining, setJoining] = useState(false);
-  const [joined, setJoined] = useState(false);
-  const [joinedSubreddit, setJoinedSubreddit] = useState<string | null>(null);
-  const activeSubreddit = joinedSubreddit ?? initialSubreddit;
-
-  const handleJoin = async () => {
-    if (joining || joined) return;
-    setJoining(true);
-    try {
-      const res = await request<{ ok: boolean; subreddit?: string }>('/api/subscribe', {
-        method: 'POST',
-        body: '{}',
-      });
-      const targetSub = res.subreddit || activeSubreddit;
-      if (res.subreddit) setJoinedSubreddit(res.subreddit);
-      setJoined(true);
-      onNotice(`Joined r/${targetSub}! 🎉`);
-    } catch {
-      try {
-        navigateTo(`https://www.reddit.com/r/${activeSubreddit}`);
-        setJoined(true);
-      } catch {
-        onNotice(`Visit r/${activeSubreddit} to join!`);
-      }
-    } finally {
-      setJoining(false);
-    }
-  };
-
-  return (
-    <div
-      className="completion-modal-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="completion-modal-title"
-      onClick={onClose}
-    >
-      <div className="completion-modal-card" onClick={(e) => e.stopPropagation()}>
-        <div className="completion-modal-badge" aria-hidden="true">
-          <span className="completion-trophy-emoji" role="img" aria-label="Trophy">
-            🏆
-          </span>
-        </div>
-        <h2 id="completion-modal-title" className="completion-modal-heading">
-          Game Completed!
-        </h2>
-        <p className="completion-modal-sub">Your ratings are ready. Share your verdict!</p>
-
-        <button
-          type="button"
-          className="completion-primary-cta"
-          disabled={commenting || commented}
-          onClick={async () => {
-            await onComment();
-          }}
-        >
-          <CommentIcon />
-          <span>{commented ? 'Commented ✓' : commenting ? 'Posting comment…' : 'Comment my ratings'}</span>
-        </button>
-
-        <button
-          type="button"
-          className={`completion-secondary-cta ${joined ? 'joined' : ''}`}
-          disabled={joining}
-          onClick={() => void handleJoin()}
-        >
-          <CommunityIcon />
-          <span>{joined ? `Joined r/${activeSubreddit} ✓` : joining ? 'Joining…' : `Join r/${activeSubreddit}`}</span>
-        </button>
-
-        <button type="button" className="completion-dismiss-btn" onClick={onClose}>
-          Maybe later
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function RatingMediaStage({ entry }: { entry: ChallengeEntry }) {
-  const [expanded, setExpanded] = useState(false);
-  const isTextOnly = !entry.imageUrl;
-  const hasText = Boolean(entry.text && entry.text.trim().length > 0);
-
-  return (
-    <div className={`rating-media-stage ${isTextOnly ? 'text-only' : ''}`}>
-      {entry.imageUrl ? (
-        <>
-          <button
-            type="button"
-            className="rating-full-image-btn"
-            onClick={(e) => {
-              e.stopPropagation();
-              setExpanded(true);
-            }}
-            aria-label="View full image"
-          >
-            <span>⛶</span>
-            <span className="rating-full-label">Full image</span>
-          </button>
-          <div className="rating-media-wrap">
-            <MediaView
-              url={entry.imageUrl}
-              alt=""
-              eager
-              className="rating-media-img"
-            />
-          </div>
-          {expanded &&
-            typeof document !== 'undefined' &&
-            createPortal(
-              <div
-                className="full-image-overlay"
-                role="dialog"
-                aria-modal="true"
-                aria-label="Full size preview"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setExpanded(false);
-                }}
-              >
-                <button
-                  type="button"
-                  className="close-full-image"
-                  aria-label="Close full image"
-                  onClick={() => setExpanded(false)}
-                >
-                  ✕
-                </button>
-                <MediaView url={entry.imageUrl} alt="" fullImage />
-              </div>,
-              document.body
-            )}
-        </>
-      ) : (
-        <div className="rating-text-card">
-          <span className="rating-text-card-label">{entry.text || 'Item'}</span>
-        </div>
-      )}
-      {hasText ? (
-        <strong className="rating-item-name">{entry.text}</strong>
-      ) : null}
-    </div>
-  );
-}
-
-function RatingGameView({
-  entries,
-  currentIndex,
-  onSelectIndex,
-  onRateCurrent,
-  currentScore = 7,
-}: {
-  entries: ChallengeEntry[];
-  currentIndex: number;
-  onSelectIndex: (idx: number) => void;
-  onRateCurrent: (score: number) => Promise<void> | void;
-  currentScore?: number;
-}) {
-  const [selectedScore, setSelectedScore] = useState(currentScore);
+  const entries = challenge.entries && challenge.entries.length > 0 ? challenge.entries : [];
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [selectedScore, setSelectedScore] = useState(7);
   const [submitting, setSubmitting] = useState(false);
+  const [expandedImage, setExpandedImage] = useState<string | null>(null);
   const touchStartXRef = useRef<number | null>(null);
 
-  const current = entries[currentIndex] ?? entries[0]!;
   const total = entries.length;
-
-  const handleRate = async () => {
-    if (submitting) return;
-    setSubmitting(true);
-    try {
-      await onRateCurrent(selectedScore);
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  const current = entries[currentIndex] ?? entries[0];
 
   const handlePrev = () => {
     if (total <= 1) return;
-    onSelectIndex(currentIndex > 0 ? currentIndex - 1 : total - 1);
+    setCurrentIndex((prev) => (prev > 0 ? prev - 1 : total - 1));
   };
 
   const handleNext = () => {
     if (total <= 1) return;
-    onSelectIndex(currentIndex < total - 1 ? currentIndex + 1 : 0);
+    setCurrentIndex((prev) => (prev < total - 1 ? prev + 1 : 0));
   };
 
   const onTouchStart = (e: TouchEvent) => {
@@ -550,389 +282,411 @@ function RatingGameView({
     const endX = e.changedTouches[0]?.clientX ?? null;
     if (endX !== null) {
       const diff = touchStartXRef.current - endX;
-      if (diff > 45) {
-        handleNext(); // swipe left -> next
-      } else if (diff < -45) {
-        handlePrev(); // swipe right -> prev
-      }
+      if (diff > 45) handleNext();
+      else if (diff < -45) handlePrev();
     }
     touchStartXRef.current = null;
   };
 
+  const lockIn = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await onRate(selectedScore);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
-    <>
+    <div className="game-card rating-carousel-card">
+      {/* Title & Description Header */}
       <div className="game-title-row rating-title-row">
-        <h1 className="game-title rating-game-title">Rating</h1>
-        <div className="game-progress-pill rating-progress-pill" aria-label={`Item ${currentIndex + 1} of ${total}`}>
-          <span className="game-progress-current rating-progress-current">{currentIndex + 1}</span>
-          <span className="game-progress-sep rating-progress-sep">of</span>
-          <span className="game-progress-total rating-progress-total">{total}</span>
-        </div>
+        <h1 className="game-title rating-game-title">{challenge.title || 'Rating'}</h1>
+        {total > 1 && (
+          <div className="game-progress-pill rating-progress-pill" aria-label={`Slide ${currentIndex + 1} of ${total}`}>
+            <span className="game-progress-current rating-progress-current">{currentIndex + 1}</span>
+            <span className="game-progress-sep rating-progress-sep">of</span>
+            <span className="game-progress-total rating-progress-total">{total}</span>
+          </div>
+        )}
       </div>
 
-      <div className="game-panel rating-panel rating-unified-container">
-        {/* Central Media Stage with Side Swipe Buttons */}
-        <div
-          className="rating-media-stage-wrapper"
-          onTouchStart={onTouchStart}
-          onTouchEnd={onTouchEnd}
-        >
-          {total > 1 && (
-            <button
-              type="button"
-              className="stage-nav-btn stage-nav-prev"
-              onClick={handlePrev}
-              aria-label="Previous image"
-              title="Previous image"
-            >
-              ‹
-            </button>
-          )}
+      {challenge.description && (
+        <p className="rating-challenge-desc">{challenge.description}</p>
+      )}
 
-          <RatingMediaStage key={current.id} entry={current} />
+      {/* Center Image Stage with Side Swipe Buttons */}
+      <div
+        className="rating-stage-container"
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+      >
+        {total > 1 && (
+          <button
+            type="button"
+            className="carousel-side-btn carousel-btn-prev"
+            onClick={handlePrev}
+            aria-label="Previous image"
+          >
+            ‹
+          </button>
+        )}
 
-          {total > 1 && (
-            <button
-              type="button"
-              className="stage-nav-btn stage-nav-next"
-              onClick={handleNext}
-              aria-label="Next image"
-              title="Next image"
-            >
-              ›
-            </button>
-          )}
-        </div>
-
-        {/* Rating Controls Card */}
-        <div className="rating-controls-card">
-          <div className="rating-controls-top">
-            <div className="rating-score-display" aria-label={`Selected score: ${selectedScore} of 10`}>
-              <span className="rating-score-star" aria-hidden="true">
-                ★
-              </span>
-              <b className="rating-score-num">{selectedScore}</b>
-              <span className="rating-score-max">/ 10</span>
+        <div className="carousel-image-frame">
+          {current?.imageUrl ? (
+            <img
+              src={current.imageUrl}
+              alt=""
+              className="carousel-main-image"
+              onClick={() => setExpandedImage(current.imageUrl ?? null)}
+            />
+          ) : (
+            <div className="carousel-no-image">
+              <span className="no-image-icon">📷</span>
+              <p>No image attached</p>
             </div>
+          )}
+
+          {current?.imageUrl && (
             <button
               type="button"
-              className="rating-submit-btn"
-              disabled={submitting}
-              onClick={() => void handleRate()}
+              className="carousel-expand-btn"
+              onClick={() => setExpandedImage(current.imageUrl ?? null)}
+              title="View full image"
             >
-              <span>{submitting ? 'Locking In…' : 'Lock In'}</span>
-              <span className="arrow-icon" aria-hidden="true">
-                →
-              </span>
+              ⛶ Full image
             </button>
-          </div>
+          )}
 
-          {/* 10-Segment Horizontal Rating Bar */}
-          <div className="rating-segments-bar" role="radiogroup" aria-label="Rating score from 1 to 10">
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => {
-              const isFilled = num <= selectedScore;
-              const isSelected = num === selectedScore;
-              return (
-                <button
-                  key={num}
-                  type="button"
-                  role="radio"
-                  aria-checked={isSelected}
-                  aria-label={`Score ${num}`}
-                  className={`rating-segment-btn ${isFilled ? 'filled' : 'unselected'} ${isSelected ? 'selected' : ''}`}
-                  onClick={() => setSelectedScore(num)}
-                >
-                  <span className="segment-number">{num}</span>
-                </button>
-              );
-            })}
+          {total > 1 && (
+            <div className="carousel-indicator-pill">
+              {currentIndex + 1} / {total}
+            </div>
+          )}
+        </div>
+
+        {total > 1 && (
+          <button
+            type="button"
+            className="carousel-side-btn carousel-btn-next"
+            onClick={handleNext}
+            aria-label="Next image"
+          >
+            ›
+          </button>
+        )}
+      </div>
+
+      {/* Item label if provided */}
+      {current?.text && current.text.trim().length > 0 && (
+        <strong className="carousel-item-caption">{current.text}</strong>
+      )}
+
+      {/* Single Rating Controls Card */}
+      <div className="rating-controls-card">
+        <div className="rating-controls-top">
+          <div className="rating-score-display" aria-label={`Selected score: ${selectedScore} of 10`}>
+            <span className="rating-score-star" aria-hidden="true">
+              ★
+            </span>
+            <b className="rating-score-num">{selectedScore}</b>
+            <span className="rating-score-max">/ 10</span>
           </div>
+          <button
+            type="button"
+            className="rating-submit-btn"
+            disabled={submitting}
+            onClick={() => void lockIn()}
+          >
+            <span>{submitting ? 'Locking In…' : 'Lock In'}</span>
+            <span className="arrow-icon" aria-hidden="true">
+              →
+            </span>
+          </button>
+        </div>
+
+        {/* 10-Segment Rating Bar */}
+        <div className="rating-segments-bar" role="radiogroup" aria-label="Rating score from 1 to 10">
+          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => {
+            const isFilled = num <= selectedScore;
+            const isSelected = num === selectedScore;
+            return (
+              <button
+                key={num}
+                type="button"
+                role="radio"
+                aria-checked={isSelected}
+                aria-label={`Score ${num}`}
+                className={`rating-segment-btn ${isFilled ? 'filled' : 'unselected'} ${isSelected ? 'selected' : ''}`}
+                onClick={() => setSelectedScore(num)}
+              >
+                <span className="segment-number">{num}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
-    </>
+
+      {/* Full Image Modal Portal */}
+      {expandedImage &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            className="full-image-overlay"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => setExpandedImage(null)}
+          >
+            <button
+              type="button"
+              className="close-full-image"
+              onClick={() => setExpandedImage(null)}
+              aria-label="Close"
+            >
+              ✕
+            </button>
+            <img src={expandedImage} alt="" className="full-image-dialog-img" />
+          </div>,
+          document.body
+        )}
+    </div>
   );
 }
 
-function GameBoard({
+// Personal Results View
+function YourResultsView({
   challenge,
-  session,
-  onSession,
-  onNotice,
-  onComplete,
+  userRating,
+  onPostComment,
+  commented,
+  commenting,
 }: {
   challenge: Challenge;
-  session: Session;
-  onSession: (s: Session) => void;
-  onNotice: (n: string) => void;
-  onComplete: (v: Record<string, number>) => void;
+  userRating: number | null;
+  onPostComment: () => void;
+  commented: boolean;
+  commenting: boolean;
 }) {
-  const [values, setValues] = useState<Record<string, number>>(session.values ?? {});
-  const entries = useMemo(
-    () =>
-      session.order
-        .map((id) => challenge.entries.find((entry) => entry.id === id))
-        .filter((entry): entry is ChallengeEntry => Boolean(entry)),
-    [session.order, challenge.entries]
-  );
-
-  // Default active index to the first unrated entry
-  const [currentIndex, setCurrentIndex] = useState(() => {
-    const unrated = entries.findIndex((entry) => session.values?.[entry.id] === undefined);
-    return unrated !== -1 ? unrated : 0;
-  });
-
-  const save = async (next: Record<string, number>) => {
-    setValues(next);
-    onSession({ ...session, values: next });
-    try {
-      await request(`/api/session/${challenge.id}/progress`, {
-        method: 'POST',
-        body: JSON.stringify({ values: next }),
-      });
-    } catch (e) {
-      onNotice(e instanceof Error ? e.message : 'Progress could not be saved.');
-    }
-  };
-
-  const current = entries[currentIndex];
-
-  if (!current) {
-    return (
-      <div className="game-panel">
-        <h2>All items rated.</h2>
-        <button className="primary" onClick={() => onComplete(values)}>
-          See results →
-        </button>
-      </div>
-    );
-  }
-
-  const onRateCurrent = async (score: number) => {
-    const next = { ...values, [current.id]: score };
-    setValues(next);
-
-    // If all rated, complete the game
-    if (Object.keys(next).length === entries.length) {
-      onComplete(next);
-      return;
-    }
-
-    await save(next);
-
-    // Find next unrated entry
-    const nextUnrated = entries.findIndex(
-      (entry, idx) => idx > currentIndex && next[entry.id] === undefined
-    );
-    if (nextUnrated !== -1) {
-      setCurrentIndex(nextUnrated);
-    } else {
-      const anyUnrated = entries.findIndex((entry) => next[entry.id] === undefined);
-      if (anyUnrated !== -1) setCurrentIndex(anyUnrated);
-      else setCurrentIndex((prev) => (prev + 1) % entries.length);
-    }
-  };
-
-  return (
-    <RatingGameView
-      key={current.id}
-      entries={entries}
-      currentIndex={currentIndex}
-      onSelectIndex={setCurrentIndex}
-      onRateCurrent={onRateCurrent}
-      currentScore={values[current.id] ?? 7}
-    />
-  );
-}
-
-function MediaView({
-  url,
-  alt = '',
-  className,
-  fullImage = false,
-  eager = false,
-}: {
-  url?: string;
-  alt?: string;
-  className?: string;
-  fullImage?: boolean;
-  eager?: boolean;
-}) {
-  if (!url) return null;
-  if (isVideoUrl(url)) {
-    return (
-      <video
-        className={className}
-        src={url}
-        autoPlay
-        loop
-        muted
-        playsInline
-        controls={fullImage}
-      />
-    );
-  }
-  return (
-    <img
-      className={className}
-      src={url}
-      alt={alt}
-      loading={eager ? 'eager' : 'lazy'}
-      onError={(e) => {
-        e.currentTarget.style.display = 'none';
-      }}
-    />
-  );
-}
-
-function YourResults({ challenge, session }: { challenge: Challenge; session: Session }) {
-  const byId = Object.fromEntries(challenge.entries.map((entry) => [entry.id, entry]));
-  const rows = Object.entries(session.values)
-    .sort((a, b) => Number(b[1]) - Number(a[1]))
-    .map(([id, value], idx) => ({
-      label: `★ ${value}/10`,
-      posNum: '',
-      entry: byId[id],
-      detail: `Your rating: ${value} of 10`,
-      displayTitle: byId[id]?.text && byId[id]?.text.trim().length > 0 ? byId[id]?.text : `Item ${idx + 1}`,
-    }));
-
-  const commentPreview =
-    `⭐ My Ratings:\n` +
-    rows.map((row) => `⭐ ${row.displayTitle}: ${row.label.replace('★ ', '')}`).join('\n');
+  const images = challenge.entries.map((e) => e.imageUrl).filter((url): url is string => Boolean(url));
 
   return (
     <div className="results-card personal-results">
       <div className="results-heading">
         <span className="success-mark">✓</span>
         <div>
-          <span className="eyebrow">GAME COMPLETE</span>
-          <h2>Results</h2>
-          <p className="results-option">My ratings</p>
+          <span className="eyebrow">RATING LOCKED IN</span>
+          <h2>Your Verdict</h2>
+          <p className="results-option">{challenge.title}</p>
         </div>
       </div>
-      <div className="ranking-feed">
-        {rows.map((row, index) => (
-          <div className="ranking-feed-row" key={`${row.label}-${row.entry?.id ?? index}`}>
-            <span className="ranking-position">{index + 1}</span>
-            {row.entry?.imageUrl ? (
-              <MediaView url={row.entry.imageUrl} alt="" />
-            ) : (
-              <span className="ranking-thumb-fallback">#{index + 1}</span>
-            )}
-            <div className="ranking-item-text">
-              <b>{row.displayTitle}</b>
-              {row.detail && <small className="rank-stat-text">{row.detail}</small>}
-            </div>
-            <span className="ranking-row-label">{row.label}</span>
-          </div>
-        ))}
-        <details className="comment-preview completed-choices">
-          <summary>Comment preview</summary>
-          <p>{commentPreview}</p>
-        </details>
+
+      <div className="your-rating-hero-badge">
+        <span className="star-icon">⭐</span>
+        <strong className="your-score-big">{userRating ?? 7}</strong>
+        <span className="your-score-out-of">/ 10</span>
+      </div>
+
+      {/* Image Thumbnail Preview Strip */}
+      {images.length > 0 && (
+        <div className="your-verdict-image-strip">
+          {images.map((url, idx) => (
+            <img key={idx} src={url} alt="" className="verdict-mini-thumb" />
+          ))}
+        </div>
+      )}
+
+      <div className="comment-cta-row">
+        <button
+          type="button"
+          className="completion-primary-cta"
+          disabled={commenting || commented}
+          onClick={onPostComment}
+        >
+          <span>{commented ? 'Commented ✓' : commenting ? 'Posting…' : 'Post my rating as comment'}</span>
+        </button>
       </div>
     </div>
   );
 }
 
-function EveryoneResults({
+// Community Results View (1-Time Rating Distribution)
+function CommunityResultsView({
   challenge,
   results,
 }: {
   challenge: Challenge;
-  results: { plays: number; totals: Record<string, string> } | null;
+  results: { totalVotes: number; average: number; topScore: number; stats: Record<string, string> } | null;
 }) {
-  const getRatingSum = (entry: ChallengeEntry) => Number(results?.totals[`rating_sum:${entry.id}`] ?? 0);
-  const getRatingCount = (entry: ChallengeEntry) => Number(results?.totals[`rating_count:${entry.id}`] ?? 0);
-  const getRatingAvg = (entry: ChallengeEntry) => {
-    const count = getRatingCount(entry);
-    return count > 0 ? getRatingSum(entry) / count : 0;
-  };
-
-  const rankedEntries = [...challenge.entries].sort((a, b) => {
-    const aAvg = getRatingAvg(a);
-    const bAvg = getRatingAvg(b);
-    if (bAvg !== aAvg) return bAvg - aAvg;
-    return getRatingCount(b) - getRatingCount(a);
-  });
-
-  const getRatingHighlight = () => {
-    if (challenge.entries.length === 0) return '—';
-    const top = rankedEntries[0];
-    if (!top) return '—';
-    const avg = getRatingAvg(top);
-    const count = getRatingCount(top);
-    if (count === 0) return 'No ratings yet';
-    const topName = top.text && top.text.trim().length > 0 ? top.text : 'Item 1';
-    return `🏆 Highest Rated: ${topName} · ★ ${avg.toFixed(1)}/10 average (${count} rating${count === 1 ? '' : 's'})`;
-  };
-
-  const ranks = rankedEntries.map((_, idx) => idx + 1);
+  const total = results?.totalVotes ?? 0;
+  const average = results?.average ?? 0;
+  const stats = results?.stats ?? {};
 
   return (
     <div className="results-card community-results">
       <div className="results-heading">
         <span className="community-mark">👥</span>
         <div>
-          <span className="eyebrow">COMMUNITY LEADERBOARD</span>
+          <span className="eyebrow">COMMUNITY VERDICT</span>
           <h2>Results</h2>
-          <p className="results-option">Everyone's ratings</p>
+          <p className="results-option">{challenge.title}</p>
         </div>
       </div>
-      {results && results.plays > 0 ? (
+
+      {total > 0 ? (
         <>
           <div className="community-winner-banner" role="status">
             <span className="winner-icon" aria-hidden="true">
-              ⭐
+              ★
             </span>
-            <p>{getRatingHighlight()}</p>
+            <p>
+              Average: <b>★ {average.toFixed(1)} / 10</b> across <b>{total}</b> rating{total === 1 ? '' : 's'}
+            </p>
           </div>
-          <div className="ranking-feed community-feed">
-            {rankedEntries.map((entry, index) => {
-              const avg = getRatingAvg(entry);
-              const count = getRatingCount(entry);
-              const pos = ranks[index];
-              const medalClass = pos === 1 ? 'medal-gold' : pos === 2 ? 'medal-silver' : pos === 3 ? 'medal-bronze' : '';
-              const titleText = entry.text && entry.text.trim().length > 0 ? entry.text : `Item ${index + 1}`;
+
+          {/* 10-Bar Community Distribution Chart */}
+          <div className="score-distribution-chart">
+            {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((s) => {
+              const count = Number(stats[String(s)] || 0);
+              const pct = total > 0 ? Math.round((count / total) * 100) : 0;
               return (
-                <div className="ranking-feed-row community-feed-row rating-community-row" key={entry.id}>
-                  <span className={`ranking-position ${medalClass}`}>#{pos}</span>
-                  {entry.imageUrl ? (
-                    <MediaView url={entry.imageUrl} alt="" />
-                  ) : (
-                    <span className="ranking-thumb-fallback">#{pos}</span>
-                  )}
-                  <div className="ranking-item-text">
-                    <b>{titleText}</b>
-                    <span className="rank-stat-text">
-                      Average: <b>{avg.toFixed(1)} / 10</b> · {count} rating{count === 1 ? '' : 's'}
-                    </span>
+                <div className="dist-row" key={s}>
+                  <span className="dist-score-num">★ {s}</span>
+                  <div className="dist-bar-track">
+                    <div className="dist-bar-fill" style={{ width: `${pct}%` }} />
                   </div>
-                  <b className={`ranking-avg-badge rating-badge ${medalClass}`}>★ {avg.toFixed(1)}/10</b>
+                  <span className="dist-score-pct">{pct}%</span>
+                  <span className="dist-score-count">({count})</span>
                 </div>
               );
             })}
-            <p className="fine-print">Only completed games are counted. Individual players and usernames are never shown.</p>
           </div>
         </>
       ) : (
         <div className="empty-state">
-          <h3>You're the first to finish.</h3>
-          <p>Community results will appear after more players complete this challenge.</p>
-          <p className="fine-print">Only completed games are counted. Individual players and usernames are never shown.</p>
+          <h3>You're the first to rate!</h3>
+          <p>Community ratings will appear as more Redditors vote on this challenge.</p>
         </div>
       )}
     </div>
   );
 }
 
-async function comment(challenge: Challenge, notice: (n: string) => void): Promise<boolean> {
-  try {
-    await request(`/api/comment/${challenge.id}`, { method: 'POST', body: '{}' });
-    notice('Your comment was submitted.');
-    return true;
-  } catch (error) {
-    notice(error instanceof Error ? error.message : 'Could not comment.');
-    return false;
-  }
+function GameBottomBar({
+  tab,
+  setTab,
+  commenting,
+  commented,
+  onComment,
+}: {
+  tab: 'Your Rating' | 'Community';
+  setTab: (t: 'Your Rating' | 'Community') => void;
+  commenting: boolean;
+  commented: boolean;
+  onComment: () => void;
+}) {
+  return (
+    <nav className="game-bottom-bar" aria-label="Rating view controls">
+      <button
+        className={`my-rank-control ${tab === 'Your Rating' ? 'selected' : ''}`}
+        onClick={() => setTab('Your Rating')}
+      >
+        You
+      </button>
+      <button
+        className={`all-rank-control ${tab === 'Community' ? 'selected' : ''}`}
+        onClick={() => setTab('Community')}
+      >
+        Community
+      </button>
+      <button
+        className="comment-rank-control"
+        disabled={commenting || commented}
+        onClick={onComment}
+      >
+        {commented ? 'Commented ✓' : commenting ? 'Sending…' : 'Comment rating'}
+      </button>
+    </nav>
+  );
+}
+
+function GameCompletionModal({
+  score,
+  onClose,
+  onComment,
+  commenting,
+  commented,
+  subreddit = 'Rank_EXE',
+  onNotice,
+}: {
+  score: number;
+  onClose: () => void;
+  onComment: () => Promise<void> | void;
+  commenting: boolean;
+  commented: boolean;
+  subreddit?: string;
+  onNotice: (n: string) => void;
+}) {
+  const [joining, setJoining] = useState(false);
+  const [joined, setJoined] = useState(false);
+
+  const handleJoin = async () => {
+    if (joining || joined) return;
+    setJoining(true);
+    try {
+      await request('/api/subscribe', { method: 'POST', body: '{}' });
+      setJoined(true);
+      onNotice(`Joined r/${subreddit}! 🎉`);
+    } catch {
+      try {
+        navigateTo(`https://www.reddit.com/r/${subreddit}`);
+        setJoined(true);
+      } catch {
+        onNotice(`Visit r/${subreddit} to join!`);
+      }
+    } finally {
+      setJoining(false);
+    }
+  };
+
+  return (
+    <div
+      className="completion-modal-overlay"
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+    >
+      <div className="completion-modal-card" onClick={(e) => e.stopPropagation()}>
+        <div className="completion-modal-badge">
+          <span className="completion-trophy-emoji">🏆</span>
+        </div>
+        <h2 className="completion-modal-heading">Rating Locked In!</h2>
+        <p className="completion-modal-sub">You rated this challenge ★ {score} / 10</p>
+
+        <button
+          type="button"
+          className="completion-primary-cta"
+          disabled={commenting || commented}
+          onClick={async () => {
+            await onComment();
+          }}
+        >
+          <span>{commented ? 'Commented ✓' : commenting ? 'Posting…' : 'Comment my rating'}</span>
+        </button>
+
+        <button
+          type="button"
+          className={`completion-secondary-cta ${joined ? 'joined' : ''}`}
+          disabled={joining}
+          onClick={() => void handleJoin()}
+        >
+          <span>{joined ? `Joined r/${subreddit} ✓` : joining ? 'Joining…' : `Join r/${subreddit}`}</span>
+        </button>
+
+        <button type="button" className="completion-dismiss-btn" onClick={onClose}>
+          Maybe later
+        </button>
+      </div>
+    </div>
+  );
 }

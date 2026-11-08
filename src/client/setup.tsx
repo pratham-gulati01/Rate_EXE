@@ -35,14 +35,15 @@ const prepareImage = async (file: File): Promise<string> => {
   }
   try {
     const bitmap = await createImageBitmap(file);
-    const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+    const scale = Math.min(1, 1400 / Math.max(bitmap.width, bitmap.height));
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(1, Math.round(bitmap.width * scale));
     canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-    canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const ctx = canvas.getContext('2d');
+    ctx?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     bitmap.close();
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/webp', 0.82));
-    if (blob && blob.size < file.size) {
+    if (blob) {
       return await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onerror = () => reject(new Error(`Could not prepare ${file.name}.`));
@@ -146,7 +147,7 @@ export const SetupApp = () => {
   const [mode, setMode] = useState<'rating' | null>(null);
   const [title, setTitle] = useState('Rating');
   const [description, setDescription] = useState('');
-  const [category, setCategory] = useState('Gaming');
+  const [category, setCategory] = useState('Tech & Gaming');
   const [entries, setEntries] = useState<ChallengeEntry[]>([{ id: makeId(), text: '' }]);
   const [draftId, setDraftId] = useState('');
   const [themeExpanded, setThemeExpanded] = useState(false);
@@ -166,38 +167,11 @@ export const SetupApp = () => {
       .catch(() => undefined);
   }, []);
 
-  useEffect(() => {
-    if (!mode) {
-      document.documentElement.classList.add('setup-no-scroll');
-      document.body.classList.add('setup-no-scroll');
-      document.documentElement.classList.remove('setup-editor-active');
-      document.body.classList.remove('setup-editor-active');
-      document.documentElement.style.overflow = 'hidden';
-      document.body.style.overflow = 'hidden';
-      document.body.style.touchAction = 'pan-y';
-    } else {
-      document.documentElement.classList.remove('setup-no-scroll');
-      document.body.classList.remove('setup-no-scroll');
-      document.documentElement.classList.add('setup-editor-active');
-      document.body.classList.add('setup-editor-active');
-      document.documentElement.style.overflow = 'auto';
-      document.body.style.overflow = 'auto';
-      document.body.style.touchAction = 'pan-y';
-    }
-    return () => {
-      document.documentElement.classList.remove('setup-no-scroll', 'setup-editor-active');
-      document.body.classList.remove('setup-no-scroll', 'setup-editor-active');
-      document.documentElement.style.overflow = '';
-      document.body.style.overflow = '';
-      document.body.style.touchAction = '';
-    };
-  }, [mode]);
-
   const startMode = (event: ReactMouseEvent<HTMLButtonElement>) => {
     try {
-      requestExpandedMode(event.nativeEvent, 'setup', { title: 'RATE.EXE — Create a game' });
+      requestExpandedMode(event.nativeEvent, 'default');
     } catch (e) {
-      console.warn('requestExpandedMode fallback:', e);
+      console.warn('requestExpandedMode:', e);
     }
     setMode('rating');
     setTitle('Rating');
@@ -209,7 +183,7 @@ export const SetupApp = () => {
     setMode('rating');
     setTitle(draft.title || 'Rating');
     setDescription(draft.description || '');
-    setCategory(draft.category || 'Gaming');
+    setCategory(draft.category || 'Tech & Gaming');
     setThemeEnabled(Boolean(draft.themeColor));
     setThemeColor(draft.themeColor ?? '#4979D0');
     setEntries(draft.entries.length ? draft.entries : [{ id: makeId(), text: '' }]);
@@ -219,7 +193,7 @@ export const SetupApp = () => {
   const updateEntry = (entryId: string, patch: Partial<ChallengeEntry>) =>
     setEntries((current) => current.map((entry) => (entry.id === entryId ? { ...entry, ...patch } : entry)));
 
-  // Batch Image Upload (Leaves text blank by default!)
+  // Batch Image Upload
   const uploadImages = async (selected: FileList | null) => {
     const files = Array.from(selected ?? []);
     if (!files.length) return;
@@ -242,7 +216,7 @@ export const SetupApp = () => {
     }
 
     setBusy(true);
-    setUploadStatus('Preparing selected images…');
+    setUploadStatus('Preparing images…');
     setUploadProgress({ done: 0, total: toUpload.length, active: 0 });
     setNotice('');
 
@@ -258,20 +232,18 @@ export const SetupApp = () => {
             const index = nextIndex++;
             const file = toUpload[index];
             if (!file) continue;
-            setUploadStatus(`Preparing image ${index + 1} of ${toUpload.length}…`);
+            setUploadStatus(`Uploading image ${index + 1} of ${toUpload.length}…`);
             try {
               const dataUrl = await prepareImage(file);
               activeUploads += 1;
-              setUploadStatus('Uploading images…');
               setUploadProgress({ done: uploaded, total: toUpload.length, active: activeUploads });
-              const mediaType = isAviFile(file) ? 'video' : isGifFile(file) ? 'gif' : 'image';
-              const result = await request<{ imageUrl: string }>('/api/media', {
+              const result = await request<{ imageUrl: string; imageUrls?: string[] }>('/api/media', {
                 method: 'POST',
-                body: JSON.stringify({ dataUrl, type: mediaType }),
+                body: JSON.stringify({ dataUrl }),
               });
-              imageUrls[index] = result.imageUrl;
+              imageUrls[index] = result.imageUrl || result.imageUrls?.[0] || dataUrl;
             } catch (err) {
-              console.error(`Upload failed for ${file.name}`, err);
+              console.error(`Upload error for ${file.name}`, err);
             } finally {
               uploaded += 1;
               activeUploads = Math.max(0, activeUploads - 1);
@@ -286,13 +258,13 @@ export const SetupApp = () => {
         .filter((item): item is { file: File; url: string } => Boolean(item.url));
 
       if (successfulImages.length === 0) {
-        throw new Error('Upload failed. Try a smaller image or GIF.');
+        throw new Error('Upload failed. Try smaller images.');
       }
 
-      // Keep text completely blank as requested
+      // Add to entries - keep text blank by default
       const incoming = successfulImages.map(({ url }) => ({
         id: makeId(),
-        text: '', // Kept blank!
+        text: '',
         imageUrl: url,
       }));
 
@@ -306,7 +278,7 @@ export const SetupApp = () => {
         return next;
       });
 
-      setNotice(`${incoming.length} image${incoming.length === 1 ? '' : 's'} uploaded.`);
+      setNotice(`${incoming.length} image${incoming.length === 1 ? '' : 's'} added.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Image upload failed.');
     } finally {
@@ -332,14 +304,13 @@ export const SetupApp = () => {
     setNotice('Uploading media…');
     try {
       const dataUrl = await prepareImage(file);
-      const mediaType = isAviFile(file) ? 'video' : isGifFile(file) ? 'gif' : 'image';
-      const result = await request<{ imageUrl: string }>('/api/media', {
+      const result = await request<{ imageUrl: string; imageUrls?: string[] }>('/api/media', {
         method: 'POST',
-        body: JSON.stringify({ dataUrl, type: mediaType }),
+        body: JSON.stringify({ dataUrl }),
       });
-      // Do not overwrite text with filename; keep current text or leave blank
+      const url = result.imageUrl || result.imageUrls?.[0] || dataUrl;
       setEntries((current) =>
-        current.map((entry) => (entry.id === entryId ? { ...entry, imageUrl: result.imageUrl } : entry))
+        current.map((entry) => (entry.id === entryId ? { ...entry, imageUrl: url } : entry))
       );
       setNotice('Media attached.');
     } catch (error) {
@@ -349,7 +320,8 @@ export const SetupApp = () => {
     }
   };
 
-  const completeEntries = entries.filter((entry) => (entry.text ?? '').trim() || entry.imageUrl?.trim());
+  // Only count entries with an image or text
+  const completeEntries = entries.filter((entry) => Boolean(entry.imageUrl?.trim() || entry.text?.trim()));
   const validCount = completeEntries.length >= 1;
 
   const saveDraft = async () => {
@@ -369,9 +341,9 @@ export const SetupApp = () => {
     }
   };
 
-  const publish = async () => {
+  const publish = async (event?: ReactMouseEvent<HTMLButtonElement>) => {
     if (!title.trim() || !validCount) {
-      return setNotice(!title.trim() ? 'Give your game a title.' : 'Add at least 1 image/entry to publish.');
+      return setNotice(!title.trim() ? 'Give your game a title.' : 'Add at least 1 image to publish.');
     }
     setBusy(true);
     setNotice('Publishing your game post…');
@@ -379,23 +351,35 @@ export const SetupApp = () => {
       const result = await request<{ postUrl: string }>('/api/publish', {
         method: 'POST',
         body: JSON.stringify({
-          title,
-          description,
+          title: title.trim(),
+          description: description.trim(),
           category,
           mode: 'rating',
           ...(themeEnabled ? { themeColor } : {}),
           entries: completeEntries,
         }),
       });
-      navigateTo(result.postUrl);
+
+      // Fix lag & glitch: exit expanded mode smoothly before navigating
+      try {
+        if (getWebViewMode() === 'expanded') {
+          exitExpandedMode(event?.nativeEvent ?? new MouseEvent('click'));
+        }
+      } catch {
+        /* ignore */
+      }
+
+      setNotice('Published! Opening post…');
+      setTimeout(() => {
+        navigateTo(result.postUrl);
+      }, 150);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Could not publish the game post.');
-    } finally {
       setBusy(false);
     }
   };
 
-  // SCREEN 1: Choose a Mode (Image 3)
+  // SCREEN 1: Choose a Mode (Centered, no extra text, POST SETUP tag)
   if (!mode) {
     return (
       <main className="setup-shell setup-mode-shell">
@@ -404,7 +388,7 @@ export const SetupApp = () => {
           <span>
             RATE<span className="accent">.EXE</span>
           </span>
-          <span className="setup-label">GAME SETUP</span>
+          <span className="setup-label">POST SETUP</span>
         </header>
 
         {notice && (
@@ -413,15 +397,13 @@ export const SetupApp = () => {
           </div>
         )}
 
-        <section className="mode-select">
-          <div className="eyebrow">BUILD A NEW GAME</div>
-          <h1>Choose a Mode</h1>
-          <p>Select the game type for your post</p>
+        <section className="mode-select-centered-section">
+          <h1 className="mode-select-centered-title">Choose a Mode</h1>
 
-          <div className="mode-list" style={{ gridTemplateColumns: 'minmax(0, 1fr)' }}>
+          <div className="mode-single-card-container">
             <button
               type="button"
-              className="mode-option"
+              className="mode-option mode-card-prominent"
               onClick={startMode}
             >
               <div className="mode-option-head">
@@ -440,7 +422,7 @@ export const SetupApp = () => {
           </div>
 
           {drafts.length > 0 && (
-            <details className="load-drafts">
+            <details className="load-drafts" style={{ marginTop: '20px' }}>
               <summary>Continue a saved draft</summary>
               <div>
                 {drafts.map((draft) => (
@@ -456,7 +438,7 @@ export const SetupApp = () => {
     );
   }
 
-  // SCREEN 2: Expanded View for Making the Game (Images 1 & 2)
+  // SCREEN 2: Expanded View (Matching Image 1)
   const statusText =
     completeEntries.length < 1
       ? `${completeEntries.length} of 1 minimum entry`
@@ -471,7 +453,11 @@ export const SetupApp = () => {
           className="setup-back-btn"
           onClick={(event) => {
             setMode(null);
-            if (getWebViewMode() === 'expanded') exitExpandedMode(event.nativeEvent);
+            try {
+              if (getWebViewMode() === 'expanded') exitExpandedMode(event.nativeEvent);
+            } catch {
+              /* ignore */
+            }
           }}
         >
           ← Back
