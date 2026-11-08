@@ -150,8 +150,15 @@ function ArrowMiniIcon() {
   );
 }
 
-export const SetupApp = () => {
+export const SetupApp = ({
+  initialMode = null,
+  onBack,
+}: {
+  initialMode?: 'rating' | null | undefined;
+  onBack?: (() => void) | undefined;
+} = {}) => {
   const [mode, setMode] = useState<'rating' | null>(() => {
+    if (initialMode) return initialMode;
     try {
       return getWebViewMode() === 'expanded' ? 'rating' : null;
     } catch {
@@ -518,6 +525,7 @@ export const SetupApp = () => {
             } catch {
               /* ignore */
             }
+            onBack?.();
           }}
         >
           ← Back

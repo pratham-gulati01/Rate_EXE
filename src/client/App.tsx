@@ -42,6 +42,8 @@ export const App = () => {
       });
   }, []);
 
+  const [setupInitialMode, setSetupInitialMode] = useState<'rating' | null>(null);
+
   if (screen === 'loading') {
     return (
       <main className="game-post-shell">
@@ -70,7 +72,12 @@ export const App = () => {
   }
 
   if (screen === 'setup') {
-    return <SetupApp />;
+    return (
+      <SetupApp
+        initialMode={setupInitialMode}
+        onBack={challenge ? () => setScreen('game') : undefined}
+      />
+    );
   }
 
   if (screen === 'game') {
@@ -78,6 +85,10 @@ export const App = () => {
       <GameApp
         initialChallenge={challenge}
         initialSubreddit={subreddit}
+        onCreateYourOwn={() => {
+          setSetupInitialMode('rating');
+          setScreen('setup');
+        }}
       />
     );
   }

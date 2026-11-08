@@ -1,8 +1,8 @@
 import './index.css';
 import { useEffect, useState, useRef } from 'react';
-import type { CSSProperties, TouchEvent } from 'react';
+import type { CSSProperties, TouchEvent, MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { navigateTo } from '@devvit/web/client';
+import { navigateTo, requestExpandedMode } from '@devvit/web/client';
 import type { Challenge } from '../shared/game';
 
 type API<T> = T & { error?: string };
@@ -28,9 +28,11 @@ const detectSubreddit = (fallback = 'Rank_EXE'): string => {
 export const GameApp = ({
   initialChallenge,
   initialSubreddit,
+  onCreateYourOwn,
 }: {
   initialChallenge?: Challenge | null;
   initialSubreddit?: string | undefined;
+  onCreateYourOwn?: (() => void) | undefined;
 } = {}) => {
   const [challenge, setChallenge] = useState<Challenge | null>(initialChallenge ?? null);
   const [userRating, setUserRating] = useState<number | null>(null);
@@ -145,6 +147,7 @@ export const GameApp = ({
           results={results}
           subreddit={subreddit}
           onNotice={setNotice}
+          onCreateYourOwn={onCreateYourOwn}
         />
       ) : (
         <div className="empty-state">
@@ -165,6 +168,7 @@ function PlayView({
   results,
   subreddit,
   onNotice,
+  onCreateYourOwn,
 }: {
   challenge: Challenge;
   userRating: number | null;
@@ -174,6 +178,7 @@ function PlayView({
   results: { totalVotes: number; average: number; topScore: number; stats: Record<string, string> } | null;
   subreddit?: string;
   onNotice: (n: string) => void;
+  onCreateYourOwn?: (() => void) | undefined;
 }) {
   const [commenting, setCommenting] = useState(false);
   const [commented, setCommented] = useState(false);
@@ -212,9 +217,20 @@ function PlayView({
       {!isCompleted ? (
         <RatingGamePlayStage challenge={challenge} onRate={handleRate} />
       ) : tab === 'Your Rating' ? (
-        <YourResultsView challenge={challenge} userRating={userRating} onPostComment={postComment} commented={commented} commenting={commenting} />
+        <YourResultsView
+          challenge={challenge}
+          userRating={userRating}
+          onPostComment={postComment}
+          commented={commented}
+          commenting={commenting}
+          onCreateYourOwn={onCreateYourOwn}
+        />
       ) : (
-        <CommunityResultsView challenge={challenge} results={results} />
+        <CommunityResultsView
+          challenge={challenge}
+          results={results}
+          onCreateYourOwn={onCreateYourOwn}
+        />
       )}
 
       {isCompleted && (
@@ -460,23 +476,45 @@ function YourResultsView({
   onPostComment,
   commented,
   commenting,
+  onCreateYourOwn,
 }: {
   challenge: Challenge;
   userRating: number | null;
   onPostComment: () => void;
   commented: boolean;
   commenting: boolean;
+  onCreateYourOwn?: (() => void) | undefined;
 }) {
   const entries = challenge.entries ?? [];
 
+  const handleCreateYourOwn = (e: ReactMouseEvent<HTMLButtonElement>) => {
+    try {
+      requestExpandedMode(e.nativeEvent, 'default');
+    } catch {
+      /* ignore */
+    }
+    onCreateYourOwn?.();
+  };
+
   return (
     <div className="results-card personal-results">
-      <div className="results-heading">
-        <span className="success-mark">✓</span>
-        <div>
-          <span className="eyebrow">RATING LOCKED IN</span>
-          <h2>Your Verdict</h2>
+      <div className="results-heading results-heading-with-action">
+        <div className="results-heading-main">
+          <span className="success-mark">✓</span>
+          <div>
+            <span className="eyebrow">RATING LOCKED IN</span>
+            <h2>Your Verdict</h2>
+          </div>
         </div>
+        {onCreateYourOwn && (
+          <button
+            type="button"
+            className="create-your-own-btn"
+            onClick={handleCreateYourOwn}
+          >
+            + Create your own
+          </button>
+        )}
       </div>
 
       <div className="your-rating-hero-badge">
@@ -523,22 +561,44 @@ function YourResultsView({
 // Community Results View (1-Time Rating Distribution)
 function CommunityResultsView({
   results,
+  onCreateYourOwn,
 }: {
   challenge?: Challenge;
   results: { totalVotes: number; average: number; topScore: number; stats: Record<string, string> } | null;
+  onCreateYourOwn?: (() => void) | undefined;
 }) {
   const total = results?.totalVotes ?? 0;
   const average = results?.average ?? 0;
   const stats = results?.stats ?? {};
 
+  const handleCreateYourOwn = (e: ReactMouseEvent<HTMLButtonElement>) => {
+    try {
+      requestExpandedMode(e.nativeEvent, 'default');
+    } catch {
+      /* ignore */
+    }
+    onCreateYourOwn?.();
+  };
+
   return (
     <div className="results-card community-results">
-      <div className="results-heading">
-        <span className="community-mark">👥</span>
-        <div>
-          <span className="eyebrow">COMMUNITY VERDICT</span>
-          <h2>Results</h2>
+      <div className="results-heading results-heading-with-action">
+        <div className="results-heading-main">
+          <span className="community-mark">👥</span>
+          <div>
+            <span className="eyebrow">COMMUNITY VERDICT</span>
+            <h2>Results</h2>
+          </div>
         </div>
+        {onCreateYourOwn && (
+          <button
+            type="button"
+            className="create-your-own-btn"
+            onClick={handleCreateYourOwn}
+          >
+            + Create your own
+          </button>
+        )}
       </div>
 
       {total > 0 ? (
