@@ -1,0 +1,41 @@
+{
+  "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
+  "name": "rate-exe-game",
+  "permissions": {
+    "redis": true,
+    "media": true,
+    "reddit": {
+      "enable": true,
+      "scope": "user",
+      "asUser": [
+        "SUBMIT_COMMENT",
+        "SUBMIT_POST",
+        "SUBSCRIBE_TO_SUBREDDIT"
+      ]
+    }
+  },
+  "post": {
+    "dir": "dist/client",
+    "entrypoints": {
+      "default": {
+        "entry": "index.html",
+        "height": "tall"
+      }
+    }
+  },
+  "server": {
+    "dir": "dist/server",
+    "entry": "index.cjs"
+  },
+  "menu": {
+    "items": [
+      {
+        "label": "Create RATE.EXE Challenge",
+        "description": "Publish a new rating challenge",
+        "location": "subreddit",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/post-create"
+      }
+    ]
+  }
+}
