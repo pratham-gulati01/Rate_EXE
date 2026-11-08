@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { context, media, reddit, redis } from '@devvit/web/server';
-import { randomInt, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { demoChallenge } from '../core/post';
 import { isValidSubmission } from '../../shared/game';
 import type { Challenge, Submission, Session } from '../../shared/game';
@@ -52,16 +52,13 @@ async function getActiveSubreddit(): Promise<string> {
 
 // 1. Initial State
 api.get('/init', async (c) => {
-  const postData = context.postData as { challengeId?: string } | undefined;
+  const postData = context.postData as { challengeId?: string; setup?: boolean } | undefined;
   const challengeId = postData?.challengeId;
+  const isSetup = postData?.setup === true || !challengeId;
   let challenge: Challenge | undefined;
 
   if (challengeId) {
     challenge = await getChallenge(challengeId);
-  }
-
-  if (!challenge) {
-    challenge = demoChallenge;
   }
 
   const subreddit = await getActiveSubreddit();
@@ -70,11 +67,83 @@ api.get('/init', async (c) => {
     username: context.username ?? 'Redditor',
     postId: context.postId ?? null,
     subreddit,
-    challenge,
+    challenge: challenge ?? null,
+    setup: isSetup && !challenge,
   });
 });
 
-// 2. Load or Start Session
+// 2. Publish New Challenge From Setup Panel
+api.post('/publish', async (c) => {
+  const userId = context.userId;
+  if (!userId) return c.json({ error: 'Sign in to publish challenge.' }, 401);
+
+  const input = await c.req.json<{
+    title: string;
+    description?: string;
+    category?: string;
+    themeColor?: string;
+    entries: Array<{ id?: string; text?: string; imageUrl?: string }>;
+  }>();
+
+  const title = (input.title || '').trim();
+  if (!title) return c.json({ error: 'Please enter a game title.' }, 400);
+
+  const rawEntries = Array.isArray(input.entries) ? input.entries : [];
+  const validEntries = rawEntries
+    .filter((e) => Boolean(e.imageUrl?.trim() || e.text?.trim()))
+    .map((e, idx) => ({
+      id: e.id || `e${idx + 1}`,
+      text: (e.text || '').trim(), // Blank by default, optional
+      imageUrl: e.imageUrl?.trim(),
+    }));
+
+  if (validEntries.length === 0) {
+    return c.json({ error: 'Please add at least 1 image to rate.' }, 400);
+  }
+
+  const id = `c_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const subredditName = await getActiveSubreddit();
+
+  const challenge: Challenge = {
+    id,
+    title,
+    description: (input.description || '').trim(),
+    category: (input.category || 'Rating').trim(),
+    mode: 'rating',
+    themeColor: input.themeColor || '#4979D0',
+    entries: validEntries,
+    creator: context.username ?? 'Moderator',
+    createdAt: Date.now(),
+    status: 'published',
+    subredditName,
+  };
+
+  await redis.set(challengeKey(id), JSON.stringify(challenge));
+
+  // Submit custom post to Reddit
+  let post;
+  try {
+    post = await reddit.submitCustomPost({
+      title: `[RATE.EXE] ${challenge.title}`,
+      subredditName,
+      entry: 'default',
+      postData: {
+        challengeId: id,
+      },
+    });
+  } catch (err) {
+    console.error('Failed to submit custom post:', err);
+    return c.json({ error: 'Failed to create Reddit post.' }, 502);
+  }
+
+  challenge.postId = post.id;
+  await redis.set(challengeKey(id), JSON.stringify(challenge));
+
+  const postUrl = `https://reddit.com/r/${subredditName}/comments/${post.id}`;
+  return c.json({ ok: true, challenge, postUrl });
+});
+
+// 3. Load or Start Session
 api.get('/session/:id', async (c) => {
   const user = context.userId;
   if (!user) return c.json({ error: 'Sign in to save your game.' }, 401);
@@ -96,19 +165,10 @@ api.get('/session/:id', async (c) => {
     }
   }
 
-  // Shuffle entries for a fresh session
-  const ordered = [...challenge.entries];
-  for (let i = ordered.length - 1; i > 0; i--) {
-    const j = randomInt(i + 1);
-    const tmp = ordered[i]!;
-    ordered[i] = ordered[j]!;
-    ordered[j] = tmp;
-  }
-
   const session: Session = {
     challengeId: challenge.id,
     mode: 'rating',
-    order: ordered.map((entry) => entry.id),
+    order: challenge.entries.map((entry) => entry.id),
     values: {},
     createdAt: Date.now(),
     status: 'in-progress',
@@ -122,7 +182,7 @@ api.get('/session/:id', async (c) => {
   return c.json({ session, challenge, subreddit });
 });
 
-// 3. Save In-Progress Progress
+// 4. Save In-Progress Progress
 api.post('/session/:id/progress', async (c) => {
   const user = context.userId;
   if (!user) return c.json({ error: 'Sign in to save progress.' }, 401);
@@ -158,7 +218,7 @@ api.post('/session/:id/progress', async (c) => {
   }
 });
 
-// 4. Complete Session & Aggregate Ratings
+// 5. Complete Session & Aggregate Ratings
 api.post('/session/:id/complete', async (c) => {
   const user = context.userId;
   if (!user) return c.json({ error: 'Sign in to complete game.' }, 401);
@@ -208,7 +268,7 @@ api.post('/session/:id/complete', async (c) => {
   }
 });
 
-// 5. Results & Stats
+// 6. Results & Stats
 api.get('/results/:id', async (c) => {
   const challenge = await getChallenge(c.req.param('id'));
   if (!challenge) return c.json({ error: 'Challenge not found.' }, 404);
@@ -221,7 +281,7 @@ api.get('/results/:id', async (c) => {
   });
 });
 
-// 6. Comment User Ratings on Reddit Post
+// 7. Comment User Ratings on Reddit Post
 api.post('/comment/:id', async (c) => {
   const user = context.userId;
   if (!user) return c.json({ error: 'Sign in to comment.' }, 401);
@@ -251,7 +311,10 @@ api.post('/comment/:id', async (c) => {
   }
 
   const byId = Object.fromEntries(
-    challenge.entries.map((entry) => [entry.id, entry.text || 'Entry'])
+    challenge.entries.map((entry, idx) => [
+      entry.id,
+      entry.text && entry.text.trim().length > 0 ? entry.text.trim() : `Item ${idx + 1}`,
+    ])
   );
   const sortedRatings = Object.entries(session.values).sort(
     (a, b) => Number(b[1]) - Number(a[1])
@@ -276,7 +339,7 @@ api.post('/comment/:id', async (c) => {
   }
 });
 
-// 7. Subscribe to Current Subreddit
+// 8. Subscribe to Current Subreddit
 api.post('/subscribe', async (c) => {
   const subreddit = await getActiveSubreddit();
   try {
@@ -288,7 +351,7 @@ api.post('/subscribe', async (c) => {
   }
 });
 
-// 8. Media Uploads
+// 9. Media Uploads (Uploaded directly to Reddit CDN via media.upload)
 api.post('/media', async (c) => {
   if (!context.userId) return c.json({ error: 'Sign in to upload media.' }, 401);
   const body = await c.req.json<{ dataUrls?: string[]; dataUrl?: string }>();
