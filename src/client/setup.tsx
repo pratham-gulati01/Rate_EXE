@@ -205,32 +205,12 @@ export const SetupApp = ({
       console.warn('addWebViewModeListener:', e);
     }
 
-    const checkInlineMode = () => {
-      try {
-        if (getWebViewMode() === 'inline') {
-          setMode(null);
-        }
-      } catch {
-        // ignore
-      }
-    };
-
-    window.addEventListener('focus', checkInlineMode);
-    const onVisibilityChange = () => {
-      if (!document.hidden) {
-        checkInlineMode();
-      }
-    };
-    document.addEventListener('visibilitychange', onVisibilityChange);
-
     return () => {
       try {
         removeWebViewModeListener(handleModeChange);
       } catch {
         // ignore
       }
-      window.removeEventListener('focus', checkInlineMode);
-      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, []);
 

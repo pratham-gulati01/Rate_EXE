@@ -638,11 +638,34 @@ function CommunityResultsView({
               );
             })}
           </div>
+
+          {onCreateYourOwn && (
+            <div className="comment-cta-row">
+              <button
+                type="button"
+                className="completion-primary-cta community-create-cta"
+                onClick={handleCreateYourOwn}
+              >
+                <span>+ Create your own post</span>
+              </button>
+            </div>
+          )}
         </>
       ) : (
         <div className="empty-state">
           <h3>You're the first to rate!</h3>
           <p>Community ratings will appear as more Redditors vote on this post.</p>
+          {onCreateYourOwn && (
+            <div className="comment-cta-row" style={{ marginTop: '14px' }}>
+              <button
+                type="button"
+                className="completion-primary-cta community-create-cta"
+                onClick={handleCreateYourOwn}
+              >
+                <span>+ Create your own post</span>
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

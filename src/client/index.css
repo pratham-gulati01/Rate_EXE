@@ -1915,6 +1915,34 @@ html.setup-no-scroll,body.setup-no-scroll,body.setup-no-scroll #root{height:100%
   cursor: default;
 }
 
+.community-create-cta {
+  width: 100%;
+  height: 40px;
+  border-radius: 8px;
+  background: #315faf;
+  border: 1px solid #4b78c6;
+  font-size: 13px;
+  font-weight: 800;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 14px rgba(7, 22, 51, 0.45);
+  transition: background 0.15s, transform 0.12s;
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+.community-create-cta:hover {
+  background: #3b6ec0;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(49, 95, 175, 0.4);
+}
+
+.community-create-cta:active {
+  transform: scale(0.98);
+}
+
 /* Community Results View */
 .community-winner-banner {
   display: flex;
