@@ -558,19 +558,22 @@ function CommunityResultsView({
             </span>
           </div>
 
-          {/* 10-Bar Community Distribution Chart */}
+          {/* 10-Bar Community Distribution Chart - Compact Space-Efficient Block */}
           <div className="score-distribution-chart">
             {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((s) => {
               const count = Number(stats[String(s)] || 0);
               const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+              const hasVotes = count > 0;
               return (
-                <div className="dist-row" key={s}>
-                  <span className="dist-score-num">★ {s}</span>
+                <div className={`dist-row ${hasVotes ? 'has-votes' : 'zero-votes'}`} key={s}>
+                  <span className="dist-score-num">{s}★</span>
                   <div className="dist-bar-track">
                     <div className="dist-bar-fill" style={{ width: `${pct}%` }} />
                   </div>
-                  <span className="dist-score-pct">{pct}%</span>
-                  <span className="dist-score-count">({count})</span>
+                  <div className="dist-stats-group">
+                    <span className="dist-score-pct">{pct}%</span>
+                    <span className="dist-score-count">{count}</span>
+                  </div>
                 </div>
               );
             })}
@@ -606,16 +609,14 @@ function GameBottomBar({
         className={`game-nav-tab my-rank-control ${tab === 'Your Rating' ? 'selected' : ''}`}
         onClick={() => setTab('Your Rating')}
       >
-        <span className="nav-tab-icon" aria-hidden="true">👤</span>
-        <span className="nav-tab-label">You</span>
+        You
       </button>
       <button
         type="button"
         className={`game-nav-tab all-rank-control ${tab === 'Community' ? 'selected' : ''}`}
         onClick={() => setTab('Community')}
       >
-        <span className="nav-tab-icon" aria-hidden="true">👥</span>
-        <span className="nav-tab-label">Community</span>
+        Community
       </button>
       <button
         type="button"
@@ -623,10 +624,7 @@ function GameBottomBar({
         disabled={commenting || commented}
         onClick={onComment}
       >
-        <span className="nav-tab-icon" aria-hidden="true">💬</span>
-        <span className="nav-tab-label">
-          {commented ? 'Commented ✓' : commenting ? 'Sending…' : 'Comment rating'}
-        </span>
+        {commented ? 'Commented ✓' : commenting ? 'Sending…' : 'Comment rating'}
       </button>
     </nav>
   );
