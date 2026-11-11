@@ -41,6 +41,10 @@ export const createPost = async () => {
     subredditName,
     title: 'RATE.EXE — Create a rating game',
     entry: 'default',
+    runAs: 'USER',
+    userGeneratedContent: {
+      text: 'RATE.EXE — Create a rating game',
+    },
     postData: {
       setup: true,
     },

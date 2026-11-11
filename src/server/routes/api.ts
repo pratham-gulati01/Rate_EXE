@@ -157,13 +157,29 @@ api.post('/publish', async (c) => {
 
   await redis.set(challengeKey(id), JSON.stringify(challenge));
 
-  // Submit custom post to Reddit
+  // Submit custom post to Reddit with user attribution and UGC
   let post;
+  const ugcTextParts = [
+    challenge.title,
+    challenge.description,
+    ...validEntries.map((e, idx) => (e.text ? `${idx + 1}. ${e.text}` : '')).filter(Boolean),
+  ].filter(Boolean);
+  const ugcText = ugcTextParts.join('\n\n').trim() || challenge.title;
+
+  const ugcImageUrls = validEntries
+    .map((e) => e.imageUrl)
+    .filter((url): url is string => Boolean(url && (url.startsWith('https://') || url.startsWith('http://'))));
+
   try {
     post = await reddit.submitCustomPost({
       title: `[RATE.EXE] ${challenge.title}`,
       subredditName,
       entry: 'default',
+      runAs: 'USER',
+      userGeneratedContent: {
+        text: ugcText,
+        ...(ugcImageUrls.length > 0 ? { imageUrls: ugcImageUrls } : {}),
+      },
       postData: {
         challengeId: id,
       },
