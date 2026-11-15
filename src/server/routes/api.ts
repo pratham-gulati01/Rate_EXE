@@ -62,6 +62,29 @@ api.get('/init', async (c) => {
     }
   }
 
+  // Ensure the app has started the comment thread automatically on the post
+  if (challenge && challenge.postId && !challenge.threadCommentId) {
+    try {
+      const cached = await redis.get(`${prefix()}thread_comment:${challenge.id}`);
+      if (cached) {
+        challenge.threadCommentId = cached;
+      } else {
+        const gameName = challenge.mode === 'yes_no' ? 'Yes or No' : 'Rating';
+        const threadCommentText = `**${gameName}: ${challenge.title}**\n\nPost your results and discuss below! 👇`;
+        const threadComment = await reddit.submitComment({
+          id: challenge.postId as `t3_${string}`,
+          text: threadCommentText,
+          runAs: 'APP',
+        });
+        challenge.threadCommentId = threadComment.id;
+        await redis.set(`${prefix()}thread_comment:${challenge.id}`, threadComment.id);
+        await redis.set(challengeKey(challenge.id), JSON.stringify(challenge));
+      }
+    } catch (e) {
+      console.warn('Auto thread comment creation in /init:', e);
+    }
+  }
+
   const subreddit = await getActiveSubreddit();
 
   return c.json({
@@ -208,12 +231,12 @@ api.post('/publish', async (c) => {
     const threadComment = await reddit.submitComment({
       id: post.id as `t3_${string}`,
       text: threadCommentText,
-      runAs: 'USER',
+      runAs: 'APP',
     });
     challenge.threadCommentId = threadComment.id;
     await redis.set(`${prefix()}thread_comment:${id}`, threadComment.id);
   } catch (commentErr) {
-    console.warn('Could not create initial thread comment:', commentErr);
+    console.warn('Could not create initial thread comment as APP:', commentErr);
   }
 
   await redis.set(challengeKey(id), JSON.stringify(challenge));
@@ -357,7 +380,7 @@ api.post('/comment/:id', async (c) => {
         const rootComment = await reddit.submitComment({
           id: challenge.postId as `t3_${string}`,
           text: threadCommentText,
-          runAs: 'USER',
+          runAs: 'APP',
         });
         targetParentId = rootComment.id as `t1_${string}`;
         challenge.threadCommentId = rootComment.id;
