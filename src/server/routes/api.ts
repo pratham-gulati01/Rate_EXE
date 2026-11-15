@@ -181,7 +181,7 @@ api.post('/publish', async (c) => {
 
   try {
     post = await reddit.submitCustomPost({
-      title: `[RATE.EXE] ${challenge.title}`,
+      title: challenge.title,
       subredditName,
       entry: 'default',
       runAs: 'USER',
@@ -199,6 +199,23 @@ api.post('/publish', async (c) => {
   }
 
   challenge.postId = post.id;
+
+  // Create the designated thread comment so all game results stay under one thread: "The game Name: Post title"
+  const gameName = challenge.mode === 'yes_no' ? 'Yes or No' : 'Rating';
+  const threadCommentText = `**${gameName}: ${challenge.title}**\n\nPost your results and discuss below! 👇`;
+
+  try {
+    const threadComment = await reddit.submitComment({
+      id: post.id as `t3_${string}`,
+      text: threadCommentText,
+      runAs: 'USER',
+    });
+    challenge.threadCommentId = threadComment.id;
+    await redis.set(`${prefix()}thread_comment:${id}`, threadComment.id);
+  } catch (commentErr) {
+    console.warn('Could not create initial thread comment:', commentErr);
+  }
+
   await redis.set(challengeKey(id), JSON.stringify(challenge));
 
   const postUrl = `https://reddit.com/r/${subredditName}/comments/${post.id}`;
@@ -320,15 +337,42 @@ api.post('/comment/:id', async (c) => {
   let commentText: string;
   if (challenge.mode === 'yes_no' || rawRating === 'YES' || rawRating === 'NO') {
     const emoji = rawRating === 'YES' ? '👍' : '👎';
-    commentText = `${emoji} **RATE.EXE Verdict**: I voted **${rawRating}**!`;
+    commentText = `${emoji} **Verdict**: I voted **${rawRating}**!`;
   } else {
     const score = Number(rawRating);
-    commentText = `⭐ **RATE.EXE Verdict**: I rated this **${score}/10**!`;
+    commentText = `⭐ **Verdict**: I rated this **${score}/10**!`;
+  }
+
+  // Ensure all comments go under one thread (the top comment: "Game Name: Post title")
+  let targetParentId: `t1_${string}` | `t3_${string}` = (challenge.threadCommentId || '') as `t1_${string}`;
+
+  if (!targetParentId) {
+    const cachedThreadId = await redis.get(`${prefix()}thread_comment:${id}`);
+    if (cachedThreadId) {
+      targetParentId = cachedThreadId as `t1_${string}`;
+    } else {
+      try {
+        const gameName = challenge.mode === 'yes_no' ? 'Yes or No' : 'Rating';
+        const threadCommentText = `**${gameName}: ${challenge.title}**\n\nPost your results and discuss below! 👇`;
+        const rootComment = await reddit.submitComment({
+          id: challenge.postId as `t3_${string}`,
+          text: threadCommentText,
+          runAs: 'USER',
+        });
+        targetParentId = rootComment.id as `t1_${string}`;
+        challenge.threadCommentId = rootComment.id;
+        await redis.set(`${prefix()}thread_comment:${id}`, rootComment.id);
+        await redis.set(challengeKey(id), JSON.stringify(challenge));
+      } catch (e) {
+        console.warn('Fallback to post ID for comment thread:', e);
+        targetParentId = challenge.postId as `t3_${string}`;
+      }
+    }
   }
 
   try {
     const posted = await reddit.submitComment({
-      id: challenge.postId as `t3_${string}`,
+      id: targetParentId,
       text: commentText,
       runAs: 'USER',
     });
