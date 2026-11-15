@@ -158,12 +158,7 @@ export const SetupApp = ({
   onBack?: (() => void) | undefined;
 } = {}) => {
   const [mode, setMode] = useState<GameMode | null>(() => {
-    if (initialMode) return initialMode;
-    try {
-      return getWebViewMode() === 'expanded' ? 'rating' : null;
-    } catch {
-      return null;
-    }
+    return initialMode ?? null;
   });
   const [title, setTitle] = useState(initialMode === 'yes_no' ? 'Yes or No' : 'Rating');
   const [description, setDescription] = useState('');
@@ -188,14 +183,11 @@ export const SetupApp = ({
   }, []);
 
   // Sync mode with webview presentation:
-  // - Expanded mode opens directly into the creation panel (no second click required)
   // - Closing expanded view returns back to "Choose a Mode" (inline)
   useEffect(() => {
     const handleModeChange = (newMode: 'inline' | 'expanded') => {
       if (newMode === 'inline') {
         setMode(null);
-      } else if (newMode === 'expanded') {
-        setMode((curr) => curr ?? 'rating');
       }
     };
 
@@ -433,6 +425,18 @@ export const SetupApp = ({
     return (
       <main className="setup-shell setup-mode-shell">
         <header className="setup-brand">
+          {onBack && (
+            <button
+              type="button"
+              className="setup-back-btn"
+              onClick={() => {
+                setMode(null);
+                onBack();
+              }}
+            >
+              ← Back
+            </button>
+          )}
           <span className="brand-mark">R</span>
           <span>
             RATE<span className="accent">.EXE</span>
