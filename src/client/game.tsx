@@ -25,6 +25,17 @@ const detectSubreddit = (fallback = 'Rank_EXE'): string => {
   return fallback;
 };
 
+type ResultsData = {
+  totalVotes: number;
+  average?: number;
+  topScore?: number;
+  yesVotes?: number;
+  noVotes?: number;
+  yesPct?: number;
+  noPct?: number;
+  stats: Record<string, string>;
+};
+
 export const GameApp = ({
   initialChallenge,
   initialSubreddit,
@@ -35,17 +46,12 @@ export const GameApp = ({
   onCreateYourOwn?: (() => void) | undefined;
 } = {}) => {
   const [challenge, setChallenge] = useState<Challenge | null>(initialChallenge ?? null);
-  const [userRating, setUserRating] = useState<number | null>(null);
+  const [userRating, setUserRating] = useState<number | string | null>(null);
   const [subreddit, setSubreddit] = useState<string>(() =>
     initialSubreddit ?? detectSubreddit(initialChallenge?.subredditName ?? 'Rank_EXE')
   );
   const [tab, setTab] = useState<'Your Rating' | 'Community'>('Your Rating');
-  const [results, setResults] = useState<{
-    totalVotes: number;
-    average: number;
-    topScore: number;
-    stats: Record<string, string>;
-  } | null>(null);
+  const [results, setResults] = useState<ResultsData | null>(null);
   const [loading, setLoading] = useState(!initialChallenge);
   const [notice, setNotice] = useState('');
 
@@ -54,18 +60,18 @@ export const GameApp = ({
       try {
         let targetChallenge = initialChallenge;
         const initData = await fetch('/api/init')
-          .then((r) => r.json() as Promise<API<{ challenge: Challenge | null; subreddit?: string; userRating?: number | null }>>)
+          .then((r) => r.json() as Promise<API<{ challenge: Challenge | null; subreddit?: string; userRating?: number | string | null }>>)
           .catch(() => null);
 
         if (initData?.subreddit) {
           setSubreddit(initData.subreddit);
         }
-        if (initData?.userRating) {
+        if (initData?.userRating !== undefined && initData?.userRating !== null) {
           setUserRating(initData.userRating);
         }
         if (!targetChallenge) {
           if (!initData?.challenge) {
-            throw new Error('This post is not connected to a rating game.');
+            throw new Error('This post is not connected to a game.');
           }
           targetChallenge = initData.challenge;
           setChallenge(targetChallenge);
@@ -86,9 +92,7 @@ export const GameApp = ({
   useEffect(() => {
     if (!challengeId) return;
     const fetchResults = () => {
-      void request<{ totalVotes: number; average: number; topScore: number; stats: Record<string, string> }>(
-        `/api/results/${challengeId}`
-      )
+      void request<ResultsData>(`/api/results/${challengeId}`)
         .then(setResults)
         .catch(() => setResults(null));
     };
@@ -98,6 +102,8 @@ export const GameApp = ({
       return () => clearInterval(interval);
     }
   }, [challengeId, userRating, tab]);
+
+  const isYesNo = challenge?.mode === 'yes_no';
 
   return (
     <main
@@ -109,7 +115,7 @@ export const GameApp = ({
         <span>
           RATE<span className="accent">.EXE</span>
         </span>
-        <span className="post-kind">RATING GAME</span>
+        <span className="post-kind">{isYesNo ? 'YES OR NO' : 'RATING GAME'}</span>
       </header>
 
       {notice && (
@@ -134,7 +140,7 @@ export const GameApp = ({
             <i />
             <i />
           </div>
-          <h1>Opening rating game</h1>
+          <h1>Opening game</h1>
           <p>Loading…</p>
         </div>
       ) : challenge ? (
@@ -171,11 +177,11 @@ function PlayView({
   onCreateYourOwn,
 }: {
   challenge: Challenge;
-  userRating: number | null;
-  setUserRating: (rating: number) => void;
+  userRating: number | string | null;
+  setUserRating: (rating: number | string) => void;
   tab: 'Your Rating' | 'Community';
   setTab: (t: 'Your Rating' | 'Community') => void;
-  results: { totalVotes: number; average: number; topScore: number; stats: Record<string, string> } | null;
+  results: ResultsData | null;
   subreddit?: string;
   onNotice: (n: string) => void;
   onCreateYourOwn?: (() => void) | undefined;
@@ -185,8 +191,9 @@ function PlayView({
   const [showCompletionModal, setShowCompletionModal] = useState(false);
 
   const isCompleted = userRating !== null;
+  const isYesNo = challenge.mode === 'yes_no';
 
-  const handleRate = async (score: number) => {
+  const handleRate = async (score: number | string) => {
     try {
       await request('/api/rate', {
         method: 'POST',
@@ -195,7 +202,7 @@ function PlayView({
       setUserRating(score);
       setShowCompletionModal(true);
     } catch (err) {
-      onNotice(err instanceof Error ? err.message : 'Could not submit rating.');
+      onNotice(err instanceof Error ? err.message : 'Could not submit vote.');
     }
   };
 
@@ -240,6 +247,7 @@ function PlayView({
           commenting={commenting}
           commented={commented}
           onComment={() => void postComment()}
+          isYesNo={isYesNo}
         />
       )}
 
@@ -247,7 +255,7 @@ function PlayView({
         typeof document !== 'undefined' &&
         createPortal(
           <GameCompletionModal
-            score={userRating ?? 7}
+            score={userRating ?? (isYesNo ? 'YES' : 7)}
             onClose={() => setShowCompletionModal(false)}
             onComment={() => void postComment()}
             commenting={commenting}
@@ -261,17 +269,19 @@ function PlayView({
   );
 }
 
-// Interactive Carousel Stage & 1-Time Rating Controls
+// Interactive Carousel Stage & Voting Dock (Supports 1-10 Slider or YES/NO Buttons)
 function RatingGamePlayStage({
   challenge,
   onRate,
 }: {
   challenge: Challenge;
-  onRate: (score: number) => Promise<void> | void;
+  onRate: (score: number | string) => Promise<void> | void;
 }) {
+  const isYesNo = challenge.mode === 'yes_no';
   const entries = challenge.entries && challenge.entries.length > 0 ? challenge.entries : [];
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedScore, setSelectedScore] = useState(7);
+  const [selectedChoice, setSelectedChoice] = useState<'YES' | 'NO' | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
   const touchStartXRef = useRef<number | null>(null);
@@ -306,9 +316,10 @@ function RatingGamePlayStage({
 
   const lockIn = async () => {
     if (submitting) return;
+    if (isYesNo && !selectedChoice) return;
     setSubmitting(true);
     try {
-      await onRate(selectedScore);
+      await onRate(isYesNo ? selectedChoice! : selectedScore);
     } finally {
       setSubmitting(false);
     }
@@ -318,7 +329,7 @@ function RatingGamePlayStage({
     <div className="game-card rating-carousel-card">
       {/* Title & Description Header */}
       <div className="game-title-row rating-title-row">
-        <h1 className="game-title rating-game-title">{challenge.title || 'Rating'}</h1>
+        <h1 className="game-title rating-game-title">{challenge.title || (isYesNo ? 'Yes or No' : 'Rating')}</h1>
         {total > 1 && (
           <div className="game-progress-pill rating-progress-pill" aria-label={`Slide ${currentIndex + 1} of ${total}`}>
             <span className="game-progress-current rating-progress-current">{currentIndex + 1}</span>
@@ -398,50 +409,102 @@ function RatingGamePlayStage({
         )}
       </div>
 
-      {/* Single Rating Controls Card */}
-      <div className="rating-controls-card">
-        <div className="rating-controls-top">
-          <div className="rating-score-display" aria-label={`Selected score: ${selectedScore} of 10`}>
-            <span className="rating-score-star" aria-hidden="true">
-              ★
-            </span>
-            <b className="rating-score-num">{selectedScore}</b>
-            <span className="rating-score-max">/ 10</span>
+      {/* Single Rating Controls Card: 10-Segment Slider OR Yes/No Buttons */}
+      {isYesNo ? (
+        <div className="rating-controls-card yes-no-controls-card">
+          <div className="rating-controls-top">
+            <div className="yes-no-choice-indicator" aria-live="polite">
+              {selectedChoice ? (
+                <span className={`choice-indicator-badge choice-${selectedChoice.toLowerCase()}`}>
+                  <span className="choice-icon">{selectedChoice === 'YES' ? '✓' : '✕'}</span>
+                  <b className="choice-val">{selectedChoice}</b>
+                </span>
+              ) : (
+                <span className="choice-indicator-prompt">Select YES or NO</span>
+              )}
+            </div>
+            <button
+              type="button"
+              className="rating-submit-btn"
+              disabled={!selectedChoice || submitting}
+              onClick={() => void lockIn()}
+            >
+              <span>{submitting ? 'Locking In…' : 'Lock In'}</span>
+              <span className="arrow-icon" aria-hidden="true">
+                →
+              </span>
+            </button>
           </div>
-          <button
-            type="button"
-            className="rating-submit-btn"
-            disabled={submitting}
-            onClick={() => void lockIn()}
-          >
-            <span>{submitting ? 'Locking In…' : 'Lock In'}</span>
-            <span className="arrow-icon" aria-hidden="true">
-              →
-            </span>
-          </button>
-        </div>
 
-        {/* 10-Segment Rating Bar */}
-        <div className="rating-segments-bar" role="radiogroup" aria-label="Rating score from 1 to 10">
-          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => {
-            const isFilled = num <= selectedScore;
-            const isSelected = num === selectedScore;
-            return (
-              <button
-                key={num}
-                type="button"
-                role="radio"
-                aria-checked={isSelected}
-                aria-label={`Score ${num}`}
-                className={`rating-segment-btn ${isFilled ? 'filled' : 'unselected'} ${isSelected ? 'selected' : ''}`}
-                onClick={() => setSelectedScore(num)}
-              >
-                <span className="segment-number">{num}</span>
-              </button>
-            );
-          })}
+          {/* 2 Big YES / NO Buttons */}
+          <div className="yes-no-buttons-row" role="radiogroup" aria-label="Yes or No choice">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={selectedChoice === 'YES'}
+              className={`yes-no-choice-btn btn-yes ${selectedChoice === 'YES' ? 'selected' : ''}`}
+              onClick={() => setSelectedChoice('YES')}
+            >
+              <span className="yes-no-btn-icon">✓</span>
+              <span className="yes-no-btn-label">YES</span>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={selectedChoice === 'NO'}
+              className={`yes-no-choice-btn btn-no ${selectedChoice === 'NO' ? 'selected' : ''}`}
+              onClick={() => setSelectedChoice('NO')}
+            >
+              <span className="yes-no-btn-icon">✕</span>
+              <span className="yes-no-btn-label">NO</span>
+            </button>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="rating-controls-card">
+          <div className="rating-controls-top">
+            <div className="rating-score-display" aria-label={`Selected score: ${selectedScore} of 10`}>
+              <span className="rating-score-star" aria-hidden="true">
+                ★
+              </span>
+              <b className="rating-score-num">{selectedScore}</b>
+              <span className="rating-score-max">/ 10</span>
+            </div>
+            <button
+              type="button"
+              className="rating-submit-btn"
+              disabled={submitting}
+              onClick={() => void lockIn()}
+            >
+              <span>{submitting ? 'Locking In…' : 'Lock In'}</span>
+              <span className="arrow-icon" aria-hidden="true">
+                →
+              </span>
+            </button>
+          </div>
+
+          {/* 10-Segment Rating Bar */}
+          <div className="rating-segments-bar" role="radiogroup" aria-label="Rating score from 1 to 10">
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => {
+              const isFilled = num <= selectedScore;
+              const isSelected = num === selectedScore;
+              return (
+                <button
+                  key={num}
+                  type="button"
+                  role="radio"
+                  aria-checked={isSelected}
+                  aria-label={`Score ${num}`}
+                  className={`rating-segment-btn ${isFilled ? 'filled' : 'unselected'} ${isSelected ? 'selected' : ''}`}
+                  onClick={() => setSelectedScore(num)}
+                >
+                  <span className="segment-number">{num}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Full Image Modal Portal */}
       {expandedImage &&
@@ -479,13 +542,14 @@ function YourResultsView({
   onCreateYourOwn,
 }: {
   challenge: Challenge;
-  userRating: number | null;
+  userRating: number | string | null;
   onPostComment: () => void;
   commented: boolean;
   commenting: boolean;
   onCreateYourOwn?: (() => void) | undefined;
 }) {
   const entries = challenge.entries ?? [];
+  const isYesNo = challenge.mode === 'yes_no' || userRating === 'YES' || userRating === 'NO';
 
   const handleCreateYourOwn = (e: ReactMouseEvent<HTMLButtonElement>) => {
     try {
@@ -502,7 +566,7 @@ function YourResultsView({
         <div className="results-heading-main">
           <span className="success-mark">✓</span>
           <div>
-            <span className="eyebrow">RATING LOCKED IN</span>
+            <span className="eyebrow">{isYesNo ? 'VOTE LOCKED IN' : 'RATING LOCKED IN'}</span>
             <h2>Your Verdict</h2>
           </div>
         </div>
@@ -517,11 +581,20 @@ function YourResultsView({
         )}
       </div>
 
-      <div className="your-rating-hero-badge">
-        <span className="star-icon" aria-hidden="true">⭐</span>
-        <strong className="your-score-big">{userRating ?? 7}</strong>
-        <span className="your-score-out-of">/ 10</span>
-      </div>
+      {isYesNo ? (
+        <div className={`your-rating-hero-badge your-vote-hero-badge ${userRating === 'YES' ? 'vote-yes' : 'vote-no'}`}>
+          <span className="vote-badge-icon" aria-hidden="true">
+            {userRating === 'YES' ? '✓' : '✕'}
+          </span>
+          <strong className="your-vote-big">{userRating ?? 'YES'}</strong>
+        </div>
+      ) : (
+        <div className="your-rating-hero-badge">
+          <span className="star-icon" aria-hidden="true">⭐</span>
+          <strong className="your-score-big">{userRating ?? 7}</strong>
+          <span className="your-score-out-of">/ 10</span>
+        </div>
+      )}
 
       {/* Image Thumbnail Preview Gallery - Preserving all rated thumbnails in original order */}
       {entries.length > 0 && (
@@ -551,25 +624,40 @@ function YourResultsView({
           disabled={commenting || commented}
           onClick={onPostComment}
         >
-          <span>{commented ? 'Commented ✓' : commenting ? 'Posting…' : 'Post my rating as comment'}</span>
+          <span>
+            {commented
+              ? 'Commented ✓'
+              : commenting
+                ? 'Posting…'
+                : isYesNo
+                  ? 'Post my vote as comment'
+                  : 'Post my rating as comment'}
+          </span>
         </button>
       </div>
     </div>
   );
 }
 
-// Community Results View (1-Time Rating Distribution)
+// Community Results View (Supports 1-10 Rating Distribution OR YES/NO Breakdown)
 function CommunityResultsView({
+  challenge,
   results,
   onCreateYourOwn,
 }: {
   challenge?: Challenge;
-  results: { totalVotes: number; average: number; topScore: number; stats: Record<string, string> } | null;
+  results: ResultsData | null;
   onCreateYourOwn?: (() => void) | undefined;
 }) {
+  const isYesNo = challenge?.mode === 'yes_no';
   const total = results?.totalVotes ?? 0;
   const average = results?.average ?? 0;
   const stats = results?.stats ?? {};
+  const yesVotes = results?.yesVotes ?? Number(stats['YES'] || 0);
+  const noVotes = results?.noVotes ?? Number(stats['NO'] || 0);
+  const countedTotal = yesVotes + noVotes > total ? yesVotes + noVotes : total;
+  const yesPct = results?.yesPct ?? (countedTotal > 0 ? Math.round((yesVotes / countedTotal) * 100) : 0);
+  const noPct = results?.noPct ?? (countedTotal > 0 ? 100 - yesPct : 0);
 
   const handleCreateYourOwn = (e: ReactMouseEvent<HTMLButtonElement>) => {
     try {
@@ -601,43 +689,93 @@ function CommunityResultsView({
         )}
       </div>
 
-      {total > 0 ? (
+      {countedTotal > 0 ? (
         <>
-          <div className="community-winner-banner" role="status">
-            <div className="community-banner-left">
-              <span className="winner-icon" aria-hidden="true">
-                ★
-              </span>
-              <div className="community-score-lead">
-                <strong className="community-avg-num">{average.toFixed(1)}</strong>
-                <span className="community-avg-max">/ 10</span>
-              </div>
-            </div>
-            <span className="community-total-pill">
-              {total} {total === 1 ? 'rating' : 'ratings'}
-            </span>
-          </div>
-
-          {/* 10-Bar Community Distribution Chart - Compact Space-Efficient Block */}
-          <div className="score-distribution-chart">
-            {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((s) => {
-              const count = Number(stats[String(s)] || 0);
-              const pct = total > 0 ? Math.round((count / total) * 100) : 0;
-              const hasVotes = count > 0;
-              return (
-                <div className={`dist-row ${hasVotes ? 'has-votes' : 'zero-votes'}`} key={s}>
-                  <span className="dist-score-num">{s}★</span>
-                  <div className="dist-bar-track">
-                    <div className="dist-bar-fill" style={{ width: `${pct}%` }} />
-                  </div>
-                  <div className="dist-stats-group">
-                    <span className="dist-score-pct">{pct}%</span>
-                    <span className="dist-score-count">{count}</span>
+          {isYesNo ? (
+            <>
+              <div className="community-winner-banner" role="status">
+                <div className="community-banner-left">
+                  <span className={`winner-icon ${yesVotes >= noVotes ? 'winner-yes' : 'winner-no'}`} aria-hidden="true">
+                    {yesVotes >= noVotes ? '✓' : '✕'}
+                  </span>
+                  <div className="community-score-lead">
+                    <strong className="community-avg-num">
+                      {yesVotes > noVotes
+                        ? `${yesPct}% YES`
+                        : noVotes > yesVotes
+                          ? `${noPct}% NO`
+                          : '50% TIE'}
+                    </strong>
                   </div>
                 </div>
-              );
-            })}
-          </div>
+                <span className="community-total-pill">
+                  {countedTotal} {countedTotal === 1 ? 'vote' : 'votes'}
+                </span>
+              </div>
+
+              {/* 2-Bar Community Distribution Chart for Yes/No */}
+              <div className="score-distribution-chart yes-no-distribution-chart">
+                <div className={`dist-row ${yesVotes > 0 ? 'has-votes' : 'zero-votes'}`}>
+                  <span className="dist-score-num dist-yes-label">YES</span>
+                  <div className="dist-bar-track">
+                    <div className="dist-bar-fill dist-bar-fill-yes" style={{ width: `${yesPct}%` }} />
+                  </div>
+                  <div className="dist-stats-group">
+                    <span className="dist-score-pct">{yesPct}%</span>
+                    <span className="dist-score-count">{yesVotes}</span>
+                  </div>
+                </div>
+                <div className={`dist-row ${noVotes > 0 ? 'has-votes' : 'zero-votes'}`}>
+                  <span className="dist-score-num dist-no-label">NO</span>
+                  <div className="dist-bar-track">
+                    <div className="dist-bar-fill dist-bar-fill-no" style={{ width: `${noPct}%` }} />
+                  </div>
+                  <div className="dist-stats-group">
+                    <span className="dist-score-pct">{noPct}%</span>
+                    <span className="dist-score-count">{noVotes}</span>
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="community-winner-banner" role="status">
+                <div className="community-banner-left">
+                  <span className="winner-icon" aria-hidden="true">
+                    ★
+                  </span>
+                  <div className="community-score-lead">
+                    <strong className="community-avg-num">{average.toFixed(1)}</strong>
+                    <span className="community-avg-max">/ 10</span>
+                  </div>
+                </div>
+                <span className="community-total-pill">
+                  {total} {total === 1 ? 'rating' : 'ratings'}
+                </span>
+              </div>
+
+              {/* 10-Bar Community Distribution Chart - Compact Space-Efficient Block */}
+              <div className="score-distribution-chart">
+                {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((s) => {
+                  const count = Number(stats[String(s)] || 0);
+                  const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+                  const hasVotes = count > 0;
+                  return (
+                    <div className={`dist-row ${hasVotes ? 'has-votes' : 'zero-votes'}`} key={s}>
+                      <span className="dist-score-num">{s}★</span>
+                      <div className="dist-bar-track">
+                        <div className="dist-bar-fill" style={{ width: `${pct}%` }} />
+                      </div>
+                      <div className="dist-stats-group">
+                        <span className="dist-score-pct">{pct}%</span>
+                        <span className="dist-score-count">{count}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
 
           {onCreateYourOwn && (
             <div className="comment-cta-row">
@@ -653,8 +791,8 @@ function CommunityResultsView({
         </>
       ) : (
         <div className="empty-state">
-          <h3>You're the first to rate!</h3>
-          <p>Community ratings will appear as more Redditors vote on this post.</p>
+          <h3>{isYesNo ? "You're the first to vote!" : "You're the first to rate!"}</h3>
+          <p>{isYesNo ? "Community votes will appear as more Redditors vote on this post." : "Community ratings will appear as more Redditors vote on this post."}</p>
           {onCreateYourOwn && (
             <div className="comment-cta-row" style={{ marginTop: '14px' }}>
               <button
@@ -678,12 +816,14 @@ function GameBottomBar({
   commenting,
   commented,
   onComment,
+  isYesNo,
 }: {
   tab: 'Your Rating' | 'Community';
   setTab: (t: 'Your Rating' | 'Community') => void;
   commenting: boolean;
   commented: boolean;
   onComment: () => void;
+  isYesNo?: boolean;
 }) {
   return (
     <nav className="game-bottom-bar" aria-label="Rating view controls">
@@ -707,7 +847,13 @@ function GameBottomBar({
         disabled={commenting || commented}
         onClick={onComment}
       >
-        {commented ? 'Commented ✓' : commenting ? 'Sending…' : 'Comment rating'}
+        {commented
+          ? 'Commented ✓'
+          : commenting
+            ? 'Sending…'
+            : isYesNo
+              ? 'Comment vote'
+              : 'Comment rating'}
       </button>
     </nav>
   );
@@ -722,7 +868,7 @@ function GameCompletionModal({
   subreddit = 'Rank_EXE',
   onNotice,
 }: {
-  score: number;
+  score: number | string;
   onClose: () => void;
   onComment: () => Promise<void> | void;
   commenting: boolean;
@@ -732,6 +878,7 @@ function GameCompletionModal({
 }) {
   const [joining, setJoining] = useState(false);
   const [joined, setJoined] = useState(false);
+  const isYesNo = score === 'YES' || score === 'NO';
 
   const handleJoin = async () => {
     if (joining || joined) return;
@@ -761,10 +908,16 @@ function GameCompletionModal({
     >
       <div className="completion-modal-card" onClick={(e) => e.stopPropagation()}>
         <div className="completion-modal-badge">
-          <span className="completion-trophy-emoji">❤️</span>
+          <span className="completion-trophy-emoji">{isYesNo ? '⚖️' : '❤️'}</span>
         </div>
-        <h2 className="completion-modal-heading">Rating Locked In!</h2>
-        <p className="completion-modal-sub">You rated this post ★ {score} / 10</p>
+        <h2 className="completion-modal-heading">{isYesNo ? 'Vote Locked In!' : 'Rating Locked In!'}</h2>
+        <p className="completion-modal-sub">
+          {isYesNo ? (
+            <>You voted <strong>{score}</strong> on this post</>
+          ) : (
+            <>You rated this post ★ {score} / 10</>
+          )}
+        </p>
 
         <button
           type="button"
@@ -774,7 +927,7 @@ function GameCompletionModal({
             await onComment();
           }}
         >
-          <span>{commented ? 'Commented ✓' : commenting ? 'Posting…' : 'Comment my rating'}</span>
+          <span>{commented ? 'Commented ✓' : commenting ? 'Posting…' : isYesNo ? 'Comment my vote' : 'Comment my rating'}</span>
         </button>
 
         <button

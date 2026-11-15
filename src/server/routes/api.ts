@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { context, media, reddit, redis } from '@devvit/web/server';
 import { randomUUID } from 'node:crypto';
 import { demoChallenge } from '../core/post';
-import type { Challenge, ChallengeEntry } from '../../shared/game';
+import type { Challenge, ChallengeEntry, GameMode } from '../../shared/game';
 
 export const api = new Hono();
 
@@ -43,13 +43,19 @@ api.get('/init', async (c) => {
   }
 
   const userId = context.userId;
-  let userRating: number | null = null;
+  let userRating: number | string | null = null;
   let stats: Record<string, string> = {};
 
   if (userId && challenge) {
     try {
       const existing = await redis.hGet(`${prefix()}ratings:${challenge.id}`, userId);
-      if (existing) userRating = Number(existing);
+      if (existing) {
+        if (existing === 'YES' || existing === 'NO') {
+          userRating = existing;
+        } else {
+          userRating = Number(existing);
+        }
+      }
       stats = (await redis.hGetAll(`${prefix()}stats:${challenge.id}`)) ?? {};
     } catch (e) {
       console.warn('Error reading user rating / stats:', e);
@@ -91,12 +97,13 @@ api.post('/drafts', async (c) => {
   if (!user) return c.json({ error: 'Sign in to save a draft.' }, 401);
   const input = await c.req.json<Record<string, unknown>>();
   const draftId = String(input.draftId || randomUUID());
+  const mode: GameMode = input.mode === 'yes_no' ? 'yes_no' : 'rating';
   const draft: Challenge = {
     id: draftId,
-    title: String(input.title || 'Rating'),
+    title: String(input.title || (mode === 'yes_no' ? 'Yes or No' : 'Rating')),
     description: String(input.description || ''),
-    category: String(input.category || 'General'),
-    mode: 'rating',
+    category: String(input.category || (mode === 'yes_no' ? 'Yes or No' : 'General')),
+    mode,
     themeColor: typeof input.themeColor === 'string' ? input.themeColor : '#4979D0',
     entries: Array.isArray(input.entries) ? (input.entries as ChallengeEntry[]) : [],
     creator: context.username ?? 'Redditor',
@@ -118,6 +125,7 @@ api.post('/publish', async (c) => {
     title: string;
     description?: string;
     category?: string;
+    mode?: GameMode;
     themeColor?: string;
     entries: Array<{ id?: string; text?: string; imageUrl?: string }>;
   }>();
@@ -140,13 +148,14 @@ api.post('/publish', async (c) => {
 
   const id = `c_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const subredditName = await getActiveSubreddit();
+  const mode: GameMode = input.mode === 'yes_no' ? 'yes_no' : 'rating';
 
   const challenge: Challenge = {
     id,
     title,
     description: (input.description || '').trim(),
-    category: (input.category || 'Rating').trim(),
-    mode: 'rating',
+    category: (input.category || (mode === 'yes_no' ? 'Yes or No' : 'Rating')).trim(),
+    mode,
     themeColor: input.themeColor || '#4979D0',
     entries: validEntries,
     creator: context.username ?? 'Moderator',
@@ -196,16 +205,27 @@ api.post('/publish', async (c) => {
   return c.json({ ok: true, challenge, postUrl });
 });
 
-// 4. Rate Challenge Once (Single Score from 1 to 10 for the Entire Challenge)
+// 4. Rate / Vote Challenge (Rating 1..10 or Yes/No)
 api.post('/rate', async (c) => {
   const userId = context.userId;
-  if (!userId) return c.json({ error: 'Must be logged in to rate.' }, 401);
+  if (!userId) return c.json({ error: 'Must be logged in to vote.' }, 401);
 
-  const { challengeId, score } = await c.req.json<{ challengeId: string; score: number }>();
-  if (!score || score < 1 || score > 10) {
-    return c.json({ error: 'Score must be between 1 and 10.' }, 400);
+  const { challengeId, score } = await c.req.json<{ challengeId: string; score: number | string }>();
+  const challenge = await getChallenge(challengeId);
+  const isYesNo = challenge?.mode === 'yes_no' || score === 'YES' || score === 'NO';
+
+  if (isYesNo) {
+    if (score !== 'YES' && score !== 'NO') {
+      return c.json({ error: 'Vote must be YES or NO.' }, 400);
+    }
+  } else {
+    const numeric = Number(score);
+    if (!score || !Number.isInteger(numeric) || numeric < 1 || numeric > 10) {
+      return c.json({ error: 'Score must be between 1 and 10.' }, 400);
+    }
   }
 
+  const scoreStr = String(score);
   const subKey = prefix();
   try {
     const existing = await redis.hGet(`${subKey}ratings:${challengeId}`, userId);
@@ -215,17 +235,17 @@ api.post('/rate', async (c) => {
       await redis.hIncrBy(`${subKey}stats:${challengeId}`, 'total_votes', 1);
     }
 
-    await redis.hSet(`${subKey}ratings:${challengeId}`, { [userId]: String(score) });
-    await redis.hIncrBy(`${subKey}stats:${challengeId}`, String(score), 1);
+    await redis.hSet(`${subKey}ratings:${challengeId}`, { [userId]: scoreStr });
+    await redis.hIncrBy(`${subKey}stats:${challengeId}`, scoreStr, 1);
   } catch (err) {
-    console.error('Failed to save rating:', err);
-    return c.json({ error: 'Failed to record rating.' }, 500);
+    console.error('Failed to save rating/vote:', err);
+    return c.json({ error: 'Failed to record vote.' }, 500);
   }
 
   return c.json({ ok: true, score });
 });
 
-// 5. Results & Stats (Aggregates Single Rating Distribution)
+// 5. Results & Stats (Aggregates Rating or Yes/No Distribution)
 api.get('/results/:id', async (c) => {
   const challengeId = c.req.param('id');
   const challenge = await getChallenge(challengeId);
@@ -233,6 +253,23 @@ api.get('/results/:id', async (c) => {
 
   const stats = (await redis.hGetAll(`${prefix()}stats:${challengeId}`)) ?? {};
   const totalVotes = Number(stats['total_votes'] || 0);
+
+  if (challenge.mode === 'yes_no') {
+    const yesVotes = Number(stats['YES'] || 0);
+    const noVotes = Number(stats['NO'] || 0);
+    const countedTotal = yesVotes + noVotes > totalVotes ? yesVotes + noVotes : totalVotes;
+    const yesPct = countedTotal > 0 ? Math.round((yesVotes / countedTotal) * 100) : 0;
+    const noPct = countedTotal > 0 ? 100 - yesPct : 0;
+    return c.json({
+      challenge,
+      stats,
+      totalVotes: countedTotal,
+      yesVotes,
+      noVotes,
+      yesPct,
+      noPct,
+    });
+  }
 
   let sum = 0;
   let topCount = 0;
@@ -256,7 +293,7 @@ api.get('/results/:id', async (c) => {
   });
 });
 
-// 6. Comment User Rating on Reddit Post
+// 6. Comment User Rating / Vote on Reddit Post
 api.post('/comment/:id', async (c) => {
   const user = context.userId;
   if (!user) return c.json({ error: 'Sign in to comment.' }, 401);
@@ -268,9 +305,8 @@ api.post('/comment/:id', async (c) => {
   }
 
   const rawRating = await redis.hGet(`${prefix()}ratings:${id}`, String(user));
-  if (!rawRating) return c.json({ error: 'Rate before commenting.' }, 409);
+  if (!rawRating) return c.json({ error: 'Vote or rate before commenting.' }, 409);
 
-  const score = Number(rawRating);
   const commentKey = `${prefix()}comment:${id}:${user}`;
   const alreadyCommented = await redis.set(commentKey, 'pending', {
     nx: true,
@@ -281,7 +317,14 @@ api.post('/comment/:id', async (c) => {
     return c.json({ error: 'You have already posted a comment for this challenge.' }, 409);
   }
 
-  const commentText = `⭐ **RATE.EXE Verdict**: I rated this **${score}/10**!`;
+  let commentText: string;
+  if (challenge.mode === 'yes_no' || rawRating === 'YES' || rawRating === 'NO') {
+    const emoji = rawRating === 'YES' ? '👍' : '👎';
+    commentText = `${emoji} **RATE.EXE Verdict**: I voted **${rawRating}**!`;
+  } else {
+    const score = Number(rawRating);
+    commentText = `⭐ **RATE.EXE Verdict**: I rated this **${score}/10**!`;
+  }
 
   try {
     const posted = await reddit.submitComment({
@@ -296,6 +339,50 @@ api.post('/comment/:id', async (c) => {
     console.error('Comment submit error:', err);
     return c.json({ error: 'Reddit failed to submit comment.' }, 502);
   }
+});
+
+// 7. Subscribe to Current Subreddit
+api.post('/subscribe', async (c) => {
+  const subreddit = await getActiveSubreddit();
+  try {
+    await reddit.subscribeToCurrentSubreddit();
+    return c.json({ ok: true, subreddit });
+  } catch (err) {
+    console.warn('Subreddit subscribe warning:', err);
+    return c.json({ ok: false, subreddit });
+  }
+});
+
+// 8. Media Uploads with Safe Fallback
+api.post('/media', async (c) => {
+  if (!context.userId) return c.json({ error: 'Sign in to upload media.' }, 401);
+  const body = await c.req.json<{ dataUrls?: string[]; dataUrl?: string }>();
+  const rawUrls = Array.isArray(body.dataUrls)
+    ? body.dataUrls
+    : typeof body.dataUrl === 'string'
+      ? [body.dataUrl]
+      : [];
+  const dataUrls = rawUrls.filter((v) => typeof v === 'string' && v.trim().length > 0);
+
+  if (dataUrls.length === 0 || dataUrls.length > 30) {
+    return c.json({ error: 'Choose 1 to 30 images or videos.' }, 400);
+  }
+
+  const uploadedUrls: string[] = [];
+  for (const url of dataUrls) {
+    try {
+      const uploaded = await media.upload({
+        url,
+        type: url.startsWith('data:image/gif') ? 'gif' : 'image',
+      });
+      uploadedUrls.push(uploaded.mediaUrl);
+    } catch (uploadErr) {
+      console.warn('media.upload fallback to direct url:', uploadErr);
+      uploadedUrls.push(url);
+    }
+  }
+
+  return c.json({ imageUrl: uploadedUrls[0], imageUrls: uploadedUrls });
 });
 
 // 7. Subscribe to Current Subreddit

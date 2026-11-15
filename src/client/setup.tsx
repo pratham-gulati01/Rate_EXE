@@ -10,7 +10,7 @@ import {
   requestExpandedMode,
 } from '@devvit/web/client';
 import { isVideoUrl } from '../shared/game';
-import type { Challenge, ChallengeEntry } from '../shared/game';
+import type { Challenge, ChallengeEntry, GameMode } from '../shared/game';
 
 type API<T> = T & { error?: string };
 const request = async <T,>(url: string, init?: RequestInit): Promise<API<T>> => {
@@ -154,10 +154,10 @@ export const SetupApp = ({
   initialMode = null,
   onBack,
 }: {
-  initialMode?: 'rating' | null | undefined;
+  initialMode?: GameMode | null | undefined;
   onBack?: (() => void) | undefined;
 } = {}) => {
-  const [mode, setMode] = useState<'rating' | null>(() => {
+  const [mode, setMode] = useState<GameMode | null>(() => {
     if (initialMode) return initialMode;
     try {
       return getWebViewMode() === 'expanded' ? 'rating' : null;
@@ -165,9 +165,9 @@ export const SetupApp = ({
       return null;
     }
   });
-  const [title, setTitle] = useState('Rating');
+  const [title, setTitle] = useState(initialMode === 'yes_no' ? 'Yes or No' : 'Rating');
   const [description, setDescription] = useState('');
-  const [category, setCategory] = useState('Tech & Gaming');
+  const [category, setCategory] = useState(initialMode === 'yes_no' ? 'Yes or No' : 'Tech & Gaming');
   const [entries, setEntries] = useState<ChallengeEntry[]>([{ id: makeId(), text: '' }]);
   const [draftId, setDraftId] = useState('');
   const [themeExpanded, setThemeExpanded] = useState(false);
@@ -195,7 +195,7 @@ export const SetupApp = ({
       if (newMode === 'inline') {
         setMode(null);
       } else if (newMode === 'expanded') {
-        setMode('rating');
+        setMode((curr) => curr ?? 'rating');
       }
     };
 
@@ -214,23 +214,25 @@ export const SetupApp = ({
     };
   }, []);
 
-  const startMode = (event: ReactMouseEvent<HTMLButtonElement>) => {
+  const startMode = (chosenMode: GameMode, event: ReactMouseEvent<HTMLButtonElement>) => {
     try {
       requestExpandedMode(event.nativeEvent, 'default');
     } catch (e) {
       console.warn('requestExpandedMode:', e);
     }
-    setMode('rating');
-    setTitle('Rating');
+    setMode(chosenMode);
+    setTitle(chosenMode === 'yes_no' ? 'Yes or No' : 'Rating');
+    setCategory(chosenMode === 'yes_no' ? 'Yes or No' : 'Tech & Gaming');
     setNotice('');
   };
 
   const loadDraft = (draft: Challenge) => {
     setDraftId(draft.id);
-    setMode('rating');
-    setTitle(draft.title || 'Rating');
+    const draftMode = draft.mode === 'yes_no' ? 'yes_no' : 'rating';
+    setMode(draftMode);
+    setTitle(draft.title || (draftMode === 'yes_no' ? 'Yes or No' : 'Rating'));
     setDescription(draft.description || '');
-    setCategory(draft.category || 'Tech & Gaming');
+    setCategory(draft.category || (draftMode === 'yes_no' ? 'Yes or No' : 'Tech & Gaming'));
     setThemeEnabled(Boolean(draft.themeColor));
     setThemeColor(draft.themeColor ?? '#4979D0');
     setEntries(draft.entries.length ? draft.entries : [{ id: makeId(), text: '' }]);
@@ -376,7 +378,7 @@ export const SetupApp = ({
     try {
       const result = await request<{ draft: Challenge }>('/api/drafts', {
         method: 'POST',
-        body: JSON.stringify({ draftId, title, description, category, mode: 'rating', ...(themeEnabled ? { themeColor } : {}), entries }),
+        body: JSON.stringify({ draftId, title, description, category, mode: mode ?? 'rating', ...(themeEnabled ? { themeColor } : {}), entries }),
       });
       setDraftId(result.draft.id);
       setDrafts((all) => [result.draft, ...all.filter((draft) => draft.id !== result.draft.id)]);
@@ -401,7 +403,7 @@ export const SetupApp = ({
           title: title.trim(),
           description: description.trim(),
           category,
-          mode: 'rating',
+          mode: mode ?? 'rating',
           ...(themeEnabled ? { themeColor } : {}),
           entries: completeEntries,
         }),
@@ -447,11 +449,11 @@ export const SetupApp = ({
         <section className="mode-select-centered-section">
           <h1 className="mode-select-centered-title">Choose a Mode</h1>
 
-          <div className="mode-single-card-container">
+          <div className="mode-cards-selection-grid">
             <button
               type="button"
               className="mode-option mode-card-prominent"
-              onClick={startMode}
+              onClick={(e) => startMode('rating', e)}
             >
               <div className="mode-option-head">
                 <div className="mode-option-title-group">
@@ -464,6 +466,25 @@ export const SetupApp = ({
               </div>
               <small className="mode-desc">
                 Score each entry from 1 to 10 with an interactive slider.
+              </small>
+            </button>
+
+            <button
+              type="button"
+              className="mode-option mode-card-prominent"
+              onClick={(e) => startMode('yes_no', e)}
+            >
+              <div className="mode-option-head">
+                <div className="mode-option-title-group">
+                  <span className="mode-icon mode-icon-yesno">⚖️</span>
+                  <b className="mode-title">Yes or No</b>
+                </div>
+                <span className="mode-check-badge" aria-hidden="true">
+                  <ArrowMiniIcon />
+                </span>
+              </div>
+              <small className="mode-desc">
+                Vote Yes or No on each entry and see community consensus.
               </small>
             </button>
           </div>
@@ -513,7 +534,7 @@ export const SetupApp = ({
         <span className="setup-brand-title">
           RATE<span className="accent">.EXE</span>
         </span>
-        <span className="setup-mode-tag">RATING</span>
+        <span className="setup-mode-tag">{mode === 'yes_no' ? 'YES OR NO' : 'RATING'}</span>
       </header>
 
       <div className="setup-content">

@@ -1,4 +1,4 @@
-export type GameMode = 'rating';
+export type GameMode = 'rating' | 'yes_no';
 
 export type ChallengeEntry = {
   id: string;
@@ -23,14 +23,14 @@ export type Challenge = {
 
 export type Submission = {
   mode: GameMode;
-  values: Record<string, number>;
+  values: Record<string, number | string>;
 };
 
 export type Session = {
   challengeId: string;
   mode: GameMode;
   order: string[];
-  values: Record<string, number>;
+  values: Record<string, number | string>;
   status: 'in-progress' | 'completed';
   createdAt?: number;
 };
@@ -45,17 +45,26 @@ export const isVideoUrl = (url?: string): boolean => {
 };
 
 export function isValidSubmission(challenge: Challenge, submission: Submission): boolean {
-  if (submission.mode !== 'rating' || challenge.entries.length === 0) return false;
+  if (challenge.entries.length === 0) return false;
   const validIds = new Set(challenge.entries.map((entry) => entry.id));
   const entries = Object.entries(submission.values);
-  return (
-    entries.length === challenge.entries.length &&
-    entries.every(
+  if (entries.length !== challenge.entries.length) return false;
+
+  if (submission.mode === 'rating') {
+    return entries.every(
       ([id, val]) =>
         validIds.has(id) &&
         Number.isInteger(Number(val)) &&
         Number(val) >= 1 &&
         Number(val) <= 10
-    )
-  );
+    );
+  }
+
+  if (submission.mode === 'yes_no') {
+    return entries.every(
+      ([id, val]) => validIds.has(id) && (val === 'YES' || val === 'NO')
+    );
+  }
+
+  return false;
 }

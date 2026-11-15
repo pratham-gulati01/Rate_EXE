@@ -2,7 +2,7 @@ import './index.css';
 import { useEffect, useState } from 'react';
 import { SetupApp } from './setup';
 import { GameApp } from './game';
-import type { Challenge } from '../shared/game';
+import type { Challenge, GameMode } from '../shared/game';
 
 type InitResult = {
   challenge?: Challenge | null;
@@ -16,6 +16,7 @@ export const App = () => {
   const [challenge, setChallenge] = useState<Challenge | null>(null);
   const [subreddit, setSubreddit] = useState<string | undefined>(undefined);
   const [notice, setNotice] = useState('');
+  const [setupInitialMode, setSetupInitialMode] = useState<GameMode | null>(null);
 
   useEffect(() => {
     void fetch('/api/init')
@@ -41,8 +42,6 @@ export const App = () => {
         setScreen('setup');
       });
   }, []);
-
-  const [setupInitialMode, setSetupInitialMode] = useState<'rating' | null>(null);
 
   if (screen === 'loading') {
     return (
@@ -86,7 +85,7 @@ export const App = () => {
         initialChallenge={challenge}
         initialSubreddit={subreddit}
         onCreateYourOwn={() => {
-          setSetupInitialMode('rating');
+          setSetupInitialMode(null);
           setScreen('setup');
         }}
       />
