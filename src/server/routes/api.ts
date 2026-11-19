@@ -34,13 +34,25 @@ async function getActiveSubreddit(): Promise<string> {
 // 1. Initial State
 api.get('/init', async (c) => {
   const postData = context.postData as { challengeId?: string; setup?: boolean } | undefined;
-  const challengeId = postData?.challengeId;
-  const isSetup = postData?.setup === true || !challengeId;
-  let challenge: Challenge | undefined;
+  let challengeId = postData?.challengeId;
 
+  // Fallback: If postData is missing/delayed, resolve challengeId from postId mapping
+  if (!challengeId && context.postId) {
+    const rawPostId = context.postId;
+    const cleanPostId = rawPostId.replace(/^t3_/, '');
+    challengeId =
+      (await redis.get(`${prefix()}post_challenge:${rawPostId}`)) ??
+      (await redis.get(`${prefix()}post_challenge:t3_${cleanPostId}`)) ??
+      (await redis.get(`${prefix()}post_challenge:${cleanPostId}`)) ??
+      undefined;
+  }
+
+  let challenge: Challenge | undefined;
   if (challengeId) {
     challenge = await getChallenge(challengeId);
   }
+
+  const isSetup = postData?.setup === true || (!challenge && !challengeId);
 
   const userId = context.userId;
   let userRating: number | string | null = null;
@@ -222,6 +234,15 @@ api.post('/publish', async (c) => {
   }
 
   challenge.postId = post.id;
+  const rawPostId = post.id;
+  const cleanPostId = rawPostId.replace(/^t3_/, '');
+  try {
+    await redis.set(`${prefix()}post_challenge:${rawPostId}`, id);
+    await redis.set(`${prefix()}post_challenge:t3_${cleanPostId}`, id);
+    await redis.set(`${prefix()}post_challenge:${cleanPostId}`, id);
+  } catch (mapErr) {
+    console.warn('Could not store post to challenge mapping:', mapErr);
+  }
 
   // Create the designated thread comment so all game results stay under one thread: "The game Name: Post title"
   const gameName = challenge.mode === 'yes_no' ? 'Yes or No' : 'Rating';

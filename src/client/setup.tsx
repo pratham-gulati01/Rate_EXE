@@ -444,6 +444,7 @@ export const SetupApp = ({
       try {
         sessionStorage.removeItem('rate_exe_intent');
         sessionStorage.removeItem('rate_exe_selected_mode');
+        sessionStorage.clear();
       } catch {
         // ignore
       }

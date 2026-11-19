@@ -28,10 +28,8 @@ export const App = () => {
           setSubreddit(data.subreddit);
         }
 
-        let intent: string | null = null;
         let savedMode: GameMode | null = null;
         try {
-          intent = sessionStorage.getItem('rate_exe_intent');
           savedMode = sessionStorage.getItem('rate_exe_selected_mode') as GameMode | null;
         } catch {
           // ignore
@@ -42,16 +40,13 @@ export const App = () => {
           setSetupInitialMode(validSavedMode);
         }
 
-        if (data.challenge && intent !== 'create') {
+        if (data.challenge) {
           setChallenge(data.challenge);
           setScreen('game');
-        } else if (data.challenge && intent === 'create') {
-          setChallenge(data.challenge);
-          setScreen('setup');
         } else if (data.setup) {
           setScreen('setup');
         } else {
-          setScreen('setup'); // Fallback to setup if no challenge yet
+          setScreen('setup');
         }
       })
       .catch((err: unknown) => {
