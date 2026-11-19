@@ -2,8 +2,13 @@ import './index.css';
 import { useEffect, useState, useRef } from 'react';
 import type { CSSProperties, TouchEvent, MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { navigateTo, requestExpandedMode } from '@devvit/web/client';
-import { isVideoUrl } from '../shared/game';
+import {
+  addWebViewModeListener,
+  getWebViewMode,
+  navigateTo,
+  removeWebViewModeListener,
+  requestExpandedMode,
+} from '@devvit/web/client';
 import type { Challenge } from '../shared/game';
 
 type API<T> = T & { error?: string };
@@ -364,30 +369,19 @@ function RatingGamePlayStage({
         <div className="carousel-image-frame">
           {current?.imageUrl ? (
             <>
-              {isVideoUrl(current.imageUrl) ? (
-                <video
-                  src={current.imageUrl}
-                  className="carousel-main-image carousel-main-video"
-                  controls
-                  playsInline
-                  autoPlay
-                  loop
-                />
-              ) : (
-                <img
-                  src={current.imageUrl}
-                  alt=""
-                  className="carousel-main-image"
-                  onClick={() => setExpandedImage(current.imageUrl ?? null)}
-                />
-              )}
+              <img
+                src={current.imageUrl}
+                alt=""
+                className="carousel-main-image"
+                onClick={() => setExpandedImage(current.imageUrl ?? null)}
+              />
               <button
                 type="button"
                 className="carousel-expand-btn"
                 onClick={() => setExpandedImage(current.imageUrl ?? null)}
-                title={isVideoUrl(current.imageUrl) ? 'View full video' : 'View full image'}
+                title="View full image"
               >
-                ⛶ {isVideoUrl(current.imageUrl) ? 'Full video' : 'Full image'}
+                ⛶ Full image
               </button>
               {current?.text && current.text.trim().length > 0 && (
                 <div className="carousel-caption-overlay">
@@ -536,17 +530,7 @@ function RatingGamePlayStage({
             >
               ✕
             </button>
-            {isVideoUrl(expandedImage) ? (
-              <video
-                src={expandedImage}
-                controls
-                autoPlay
-                playsInline
-                className="full-image-dialog-img"
-              />
-            ) : (
-              <img src={expandedImage} alt="" className="full-image-dialog-img" />
-            )}
+            <img src={expandedImage} alt="" className="full-image-dialog-img" />
           </div>,
           document.body
         )}
@@ -575,7 +559,39 @@ function YourResultsView({
 
   const handleCreateYourOwn = (e: ReactMouseEvent<HTMLButtonElement>) => {
     try {
-      requestExpandedMode(e.nativeEvent, 'default');
+      if (getWebViewMode() !== 'expanded') {
+        let transitioned = false;
+        const onExpand = (mode: 'inline' | 'expanded') => {
+          if (mode === 'expanded' && !transitioned) {
+            transitioned = true;
+            try {
+              removeWebViewModeListener(onExpand);
+            } catch {
+              // ignore
+            }
+            onCreateYourOwn?.();
+          }
+        };
+        try {
+          addWebViewModeListener(onExpand);
+          (requestExpandedMode as any)(e.nativeEvent);
+        } catch {
+          onCreateYourOwn?.();
+          return;
+        }
+        setTimeout(() => {
+          if (!transitioned) {
+            transitioned = true;
+            try {
+              removeWebViewModeListener(onExpand);
+            } catch {
+              // ignore
+            }
+            onCreateYourOwn?.();
+          }
+        }, 700);
+        return;
+      }
     } catch {
       /* ignore */
     }
@@ -624,20 +640,11 @@ function YourResultsView({
           {entries.map((entry, idx) => (
             <div key={entry.id || idx} className="verdict-thumb-slot">
               {entry.imageUrl ? (
-                isVideoUrl(entry.imageUrl) ? (
-                  <video
-                    src={entry.imageUrl}
-                    muted
-                    playsInline
-                    className="verdict-thumb-img"
-                  />
-                ) : (
-                  <img
-                    src={entry.imageUrl}
-                    alt={entry.text ? entry.text : `Slide ${idx + 1}`}
-                    className="verdict-thumb-img"
-                  />
-                )
+                <img
+                  src={entry.imageUrl}
+                  alt={entry.text ? entry.text : `Slide ${idx + 1}`}
+                  className="verdict-thumb-img"
+                />
               ) : (
                 <div className="verdict-thumb-text-fallback">
                   <span>{entry.text ? entry.text : `Item ${idx + 1}`}</span>
@@ -692,7 +699,39 @@ function CommunityResultsView({
 
   const handleCreateYourOwn = (e: ReactMouseEvent<HTMLButtonElement>) => {
     try {
-      requestExpandedMode(e.nativeEvent, 'default');
+      if (getWebViewMode() !== 'expanded') {
+        let transitioned = false;
+        const onExpand = (mode: 'inline' | 'expanded') => {
+          if (mode === 'expanded' && !transitioned) {
+            transitioned = true;
+            try {
+              removeWebViewModeListener(onExpand);
+            } catch {
+              // ignore
+            }
+            onCreateYourOwn?.();
+          }
+        };
+        try {
+          addWebViewModeListener(onExpand);
+          (requestExpandedMode as any)(e.nativeEvent);
+        } catch {
+          onCreateYourOwn?.();
+          return;
+        }
+        setTimeout(() => {
+          if (!transitioned) {
+            transitioned = true;
+            try {
+              removeWebViewModeListener(onExpand);
+            } catch {
+              // ignore
+            }
+            onCreateYourOwn?.();
+          }
+        }, 700);
+        return;
+      }
     } catch {
       /* ignore */
     }

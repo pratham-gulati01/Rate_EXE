@@ -427,7 +427,7 @@ api.post('/subscribe', async (c) => {
   }
 });
 
-// 8. Media Uploads with Safe Fallback (supports images, GIFs, and MP4 videos)
+// 8. Media Uploads with Safe Fallback (Images & GIFs, max 20 MB)
 api.post('/media', async (c) => {
   if (!context.userId) return c.json({ error: 'Sign in to upload media.' }, 401);
   const body = await c.req.json<{ dataUrls?: string[]; dataUrl?: string }>();
@@ -439,26 +439,15 @@ api.post('/media', async (c) => {
   const dataUrls = rawUrls.filter((v) => typeof v === 'string' && v.trim().length > 0);
 
   if (dataUrls.length === 0 || dataUrls.length > 30) {
-    return c.json({ error: 'Choose 1 to 30 images or videos.' }, 400);
+    return c.json({ error: 'Choose 1 to 30 images.' }, 400);
   }
-
-  const isVideoDataUrl = (url: string) =>
-    url.startsWith('data:video/') || /\.(mp4|avi|webm|mov|mkv)(\?|$)/i.test(url);
-
-  const isGifDataUrl = (url: string) =>
-    url.startsWith('data:image/gif') || /\.gif(\?|$)/i.test(url);
 
   const uploadedUrls: string[] = [];
   for (const url of dataUrls) {
     try {
-      const mediaType: 'video' | 'gif' | 'image' = isVideoDataUrl(url)
-        ? 'video'
-        : isGifDataUrl(url)
-          ? 'gif'
-          : 'image';
       const uploaded = await media.upload({
         url,
-        type: mediaType,
+        type: url.startsWith('data:image/gif') ? 'gif' : 'image',
       });
       uploadedUrls.push(uploaded.mediaUrl);
     } catch (uploadErr) {

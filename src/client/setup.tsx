@@ -9,7 +9,6 @@ import {
   removeWebViewModeListener,
   requestExpandedMode,
 } from '@devvit/web/client';
-import { isVideoUrl } from '../shared/game';
 import type { Challenge, ChallengeEntry, GameMode } from '../shared/game';
 
 type API<T> = T & { error?: string };
@@ -25,24 +24,12 @@ const makeId = () => Math.random().toString(36).slice(2, 9);
 const isGifFile = (file: File) =>
   file.type === 'image/gif' || file.type === 'image/x-gif' || /\.gif$/i.test(file.name);
 
-const isAviFile = (file: File) =>
-  /\.avi$/i.test(file.name) || ['video/x-msvideo', 'video/avi', 'video/msvideo'].includes(file.type);
-
 const isAvifFile = (file: File) =>
   /\.avif$/i.test(file.name) || file.type === 'image/avif';
 
-const isMp4File = (file: File) =>
-  /\.mp4$/i.test(file.name) || file.type === 'video/mp4';
-
-const isVideoFile = (file: File) =>
-  isAviFile(file) ||
-  isMp4File(file) ||
-  file.type.startsWith('video/') ||
-  /\.(mp4|avi|webm|mov|mkv)$/i.test(file.name);
-
 const prepareImage = async (file: File): Promise<string> => {
-  // Never convert GIFs or Videos to canvas webp, otherwise video sound/animation is lost!
-  if (isGifFile(file) || isVideoFile(file)) {
+  // Never convert GIFs to static canvas webp so animation is preserved!
+  if (isGifFile(file)) {
     return await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
@@ -257,15 +244,49 @@ export const SetupApp = ({
     } catch {
       // ignore
     }
-    try {
-      requestExpandedMode(event.nativeEvent, 'default');
-    } catch (e) {
-      console.warn('requestExpandedMode:', e);
+
+    const applyMode = () => {
+      setMode(chosenMode);
+      setTitle(chosenMode === 'yes_no' ? 'Yes or No' : 'Rating');
+      setCategory(chosenMode === 'yes_no' ? 'Yes or No' : 'Tech & Gaming');
+      setNotice('');
+    };
+
+    if (getWebViewMode() !== 'expanded') {
+      let transitioned = false;
+      const onExpand = (mode: 'inline' | 'expanded') => {
+        if (mode === 'expanded' && !transitioned) {
+          transitioned = true;
+          try {
+            removeWebViewModeListener(onExpand);
+          } catch {
+            // ignore
+          }
+          applyMode();
+        }
+      };
+      try {
+        addWebViewModeListener(onExpand);
+        (requestExpandedMode as any)(event.nativeEvent);
+      } catch (e) {
+        console.warn('requestExpandedMode:', e);
+        applyMode();
+        return;
+      }
+      setTimeout(() => {
+        if (!transitioned) {
+          transitioned = true;
+          try {
+            removeWebViewModeListener(onExpand);
+          } catch {
+            // ignore
+          }
+          applyMode();
+        }
+      }, 700);
+    } else {
+      applyMode();
     }
-    setMode(chosenMode);
-    setTitle(chosenMode === 'yes_no' ? 'Yes or No' : 'Rating');
-    setCategory(chosenMode === 'yes_no' ? 'Yes or No' : 'Tech & Gaming');
-    setNotice('');
   };
 
   const loadDraft = (draft: Challenge) => {
@@ -289,7 +310,7 @@ export const SetupApp = ({
   const updateEntry = (entryId: string, patch: Partial<ChallengeEntry>) =>
     setEntries((current) => current.map((entry) => (entry.id === entryId ? { ...entry, ...patch } : entry)));
 
-  // Batch Image & Video Upload (Max 20 MB each)
+  // Batch Image Upload (Max 20 MB each)
   const uploadImages = async (selected: FileList | null) => {
     const files = Array.from(selected ?? []);
     if (!files.length) return;
@@ -300,25 +321,18 @@ export const SetupApp = ({
       'image/gif',
       'image/x-gif',
       'image/avif',
-      'video/x-msvideo',
-      'video/avi',
-      'video/msvideo',
-      'video/mp4',
-      'video/webm',
-      'video/quicktime',
     ];
     const isAllowed = (file: File) =>
       allowed.includes(file.type) ||
       isGifFile(file) ||
-      isVideoFile(file) ||
       isAvifFile(file) ||
-      /\.(png|jpe?g|webp|gif|avif|avi|mp4|webm|mov)$/i.test(file.name);
+      /\.(png|jpe?g|webp|gif|avif)$/i.test(file.name);
     if (files.some((file) => !isAllowed(file))) {
-      setNotice('Choose PNG, JPEG, WEBP, GIF, AVIF, AVI, or MP4 files.');
+      setNotice('Choose PNG, JPEG, WEBP, GIF, or AVIF image files.');
       return;
     }
     if (files.some((file) => file.size > 20 * 1024 * 1024)) {
-      setNotice('Choose images or videos under 20 MB each.');
+      setNotice('Choose images under 20 MB each.');
       return;
     }
 
@@ -411,29 +425,22 @@ export const SetupApp = ({
       'image/gif',
       'image/x-gif',
       'image/avif',
-      'video/x-msvideo',
-      'video/avi',
-      'video/msvideo',
-      'video/mp4',
-      'video/webm',
-      'video/quicktime',
     ];
     const isAllowed =
       allowed.includes(file.type) ||
       isGifFile(file) ||
-      isVideoFile(file) ||
       isAvifFile(file) ||
-      /\.(png|jpe?g|webp|gif|avif|avi|mp4|webm|mov)$/i.test(file.name);
+      /\.(png|jpe?g|webp|gif|avif)$/i.test(file.name);
     if (!isAllowed) {
-      setNotice('Choose PNG, JPEG, WEBP, GIF, AVIF, AVI, or MP4 files.');
+      setNotice('Choose PNG, JPEG, WEBP, GIF, or AVIF image files.');
       return;
     }
     if (file.size > 20 * 1024 * 1024) {
-      setNotice('Choose media under 20 MB.');
+      setNotice('Choose images under 20 MB.');
       return;
     }
     setBusy(true);
-    setNotice('Uploading media…');
+    setNotice('Uploading image…');
     try {
       const dataUrl = await prepareImage(file);
       const result = await request<{ imageUrl: string; imageUrls?: string[] }>('/api/media', {
@@ -444,9 +451,9 @@ export const SetupApp = ({
       setEntries((current) =>
         current.map((entry) => (entry.id === entryId ? { ...entry, imageUrl: url } : entry))
       );
-      setNotice('Media attached.');
+      setNotice('Image attached.');
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'Media upload failed.');
+      setNotice(error instanceof Error ? error.message : 'Image upload failed.');
     } finally {
       setBusy(false);
     }
@@ -520,9 +527,15 @@ export const SetupApp = ({
             <button
               type="button"
               className="setup-back-btn"
-              onClick={() => {
-                setMode(null);
+              onClick={(event) => {
                 onBack();
+                try {
+                  if (getWebViewMode() === 'expanded') {
+                    exitExpandedMode(event.nativeEvent);
+                  }
+                } catch {
+                  /* ignore */
+                }
               }}
             >
               ← Back
@@ -614,14 +627,9 @@ export const SetupApp = ({
         <button
           type="button"
           className="setup-back-btn"
-          onClick={(event) => {
+          onClick={() => {
             setMode(null);
-            try {
-              if (getWebViewMode() === 'expanded') exitExpandedMode(event.nativeEvent);
-            } catch {
-              /* ignore */
-            }
-            onBack?.();
+            setNotice('');
           }}
         >
           ← Back
@@ -812,7 +820,7 @@ export const SetupApp = ({
               <span className="toolbar-subtitle">Upload</span>
               <input
                 type="file"
-                accept="image/png,image/jpeg,image/webp,image/gif,image/avif,video/x-msvideo,video/avi,video/msvideo,video/mp4,video/*,image/*"
+                accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
                 multiple
                 disabled={busy || completeEntries.length >= maxEntries}
                 onChange={(event) => {
@@ -887,17 +895,13 @@ export const SetupApp = ({
                 <div className="setup-entry-thumb">
                   {entry.imageUrl ? (
                     <div className="setup-entry-media-wrap">
-                      {isVideoUrl(entry.imageUrl) ? (
-                        <video src={entry.imageUrl} autoPlay loop muted playsInline />
-                      ) : (
-                        <img
-                          src={entry.imageUrl}
-                          alt=""
-                          onError={(event) => {
-                            event.currentTarget.alt = 'Media error';
-                          }}
-                        />
-                      )}
+                      <img
+                        src={entry.imageUrl}
+                        alt=""
+                        onError={(event) => {
+                          event.currentTarget.alt = 'Media error';
+                        }}
+                      />
                       <span className="setup-thumb-num">{String(index + 1).padStart(2, '0')}</span>
                       <button
                         type="button"
@@ -940,7 +944,7 @@ export const SetupApp = ({
                     <PhotoAttachmentIcon />
                     <input
                       type="file"
-                      accept="image/png,image/jpeg,image/webp,image/gif,image/avif,video/x-msvideo,video/avi,video/msvideo,video/mp4,video/*,image/*"
+                      accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
                       disabled={busy}
                       onChange={(event) => {
                         const file = event.currentTarget.files?.[0];

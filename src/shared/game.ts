@@ -36,15 +36,6 @@ export type Session = {
   createdAt?: number;
 };
 
-export const isVideoUrl = (url?: string): boolean => {
-  if (!url) return false;
-  return (
-    /\.(avi|mp4|webm|mov|mkv)(\?|$)/i.test(url) ||
-    url.startsWith('data:video/') ||
-    url.includes('v.redd.it')
-  );
-};
-
 export function isValidSubmission(challenge: Challenge, submission: Submission): boolean {
   if (challenge.entries.length === 0) return false;
   const validIds = new Set(challenge.entries.map((entry) => entry.id));
