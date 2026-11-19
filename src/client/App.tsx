@@ -37,12 +37,16 @@ export const App = () => {
           // ignore
         }
 
+        const validSavedMode = savedMode === 'rating' || savedMode === 'yes_no' ? savedMode : null;
+        if (validSavedMode) {
+          setSetupInitialMode(validSavedMode);
+        }
+
         if (data.challenge && intent !== 'create') {
           setChallenge(data.challenge);
           setScreen('game');
         } else if (data.challenge && intent === 'create') {
           setChallenge(data.challenge);
-          setSetupInitialMode(savedMode === 'rating' || savedMode === 'yes_no' ? savedMode : null);
           setScreen('setup');
         } else if (data.setup) {
           setScreen('setup');

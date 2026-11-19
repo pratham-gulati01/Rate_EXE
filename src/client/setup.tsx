@@ -2,11 +2,9 @@ import './index.css';
 import { useEffect, useState } from 'react';
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from 'react';
 import {
-  addWebViewModeListener,
   exitExpandedMode,
   getWebViewMode,
   navigateTo,
-  removeWebViewModeListener,
   requestExpandedMode,
 } from '@devvit/web/client';
 import type { Challenge, ChallengeEntry, GameMode } from '../shared/game';
@@ -164,7 +162,7 @@ export const SetupApp = ({
   onBack?: (() => void) | undefined;
 } = {}) => {
   const [mode, setMode] = useState<GameMode | null>(() => {
-    if (initialMode) return initialMode;
+    if (initialMode === 'rating' || initialMode === 'yes_no') return initialMode;
     try {
       const saved = sessionStorage.getItem('rate_exe_selected_mode') as GameMode | null;
       if (saved === 'rating' || saved === 'yes_no') {
@@ -175,9 +173,15 @@ export const SetupApp = ({
     }
     return null;
   });
-  const [title, setTitle] = useState(initialMode === 'yes_no' ? 'Yes or No' : 'Rating');
+  const [title, setTitle] = useState(() => {
+    const active = initialMode ?? (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('rate_exe_selected_mode') : null);
+    return active === 'yes_no' ? 'Yes or No' : 'Rating';
+  });
   const [description, setDescription] = useState('');
-  const [category, setCategory] = useState(initialMode === 'yes_no' ? 'Yes or No' : 'Tech & Gaming');
+  const [category, setCategory] = useState(() => {
+    const active = initialMode ?? (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('rate_exe_selected_mode') : null);
+    return active === 'yes_no' ? 'Yes or No' : 'Tech & Gaming';
+  });
   const [entries, setEntries] = useState<ChallengeEntry[]>([{ id: makeId(), text: '' }]);
   const [draftId, setDraftId] = useState('');
   const [themeExpanded, setThemeExpanded] = useState(false);
@@ -197,46 +201,13 @@ export const SetupApp = ({
       .catch(() => undefined);
   }, []);
 
-  // Sync mode with webview presentation:
-  // - Closing expanded view returns back to "Choose a Mode" (inline)
-  // - When expanding from an inline click, restore the selected mode directly
   useEffect(() => {
-    const handleModeChange = (newMode: 'inline' | 'expanded') => {
-      if (newMode === 'inline') {
-        try {
-          sessionStorage.removeItem('rate_exe_selected_mode');
-        } catch {
-          // ignore
-        }
-        setMode(null);
-      } else if (newMode === 'expanded') {
-        try {
-          const saved = sessionStorage.getItem('rate_exe_selected_mode') as GameMode | null;
-          if (saved === 'rating' || saved === 'yes_no') {
-            setMode(saved);
-            setTitle(saved === 'yes_no' ? 'Yes or No' : 'Rating');
-            setCategory(saved === 'yes_no' ? 'Yes or No' : 'Tech & Gaming');
-          }
-        } catch {
-          // ignore
-        }
-      }
-    };
-
-    try {
-      addWebViewModeListener(handleModeChange);
-    } catch (e) {
-      console.warn('addWebViewModeListener:', e);
+    if (initialMode === 'rating' || initialMode === 'yes_no') {
+      setMode(initialMode);
+      setTitle(initialMode === 'yes_no' ? 'Yes or No' : 'Rating');
+      setCategory(initialMode === 'yes_no' ? 'Yes or No' : 'Tech & Gaming');
     }
-
-    return () => {
-      try {
-        removeWebViewModeListener(handleModeChange);
-      } catch {
-        // ignore
-      }
-    };
-  }, []);
+  }, [initialMode]);
 
   const startMode = (chosenMode: GameMode, event: ReactMouseEvent<HTMLButtonElement>) => {
     try {
@@ -246,47 +217,17 @@ export const SetupApp = ({
       // ignore
     }
 
-    const applyMode = () => {
-      setMode(chosenMode);
-      setTitle(chosenMode === 'yes_no' ? 'Yes or No' : 'Rating');
-      setCategory(chosenMode === 'yes_no' ? 'Yes or No' : 'Tech & Gaming');
-      setNotice('');
-    };
+    setMode(chosenMode);
+    setTitle(chosenMode === 'yes_no' ? 'Yes or No' : 'Rating');
+    setCategory(chosenMode === 'yes_no' ? 'Yes or No' : 'Tech & Gaming');
+    setNotice('');
 
-    if (getWebViewMode() !== 'expanded') {
-      let transitioned = false;
-      const onExpand = (mode: 'inline' | 'expanded') => {
-        if (mode === 'expanded' && !transitioned) {
-          transitioned = true;
-          try {
-            removeWebViewModeListener(onExpand);
-          } catch {
-            // ignore
-          }
-          applyMode();
-        }
-      };
-      try {
-        addWebViewModeListener(onExpand);
+    try {
+      if (getWebViewMode() !== 'expanded') {
         requestExpandedMode(event.nativeEvent, 'default');
-      } catch (e) {
-        console.warn('requestExpandedMode:', e);
-        applyMode();
-        return;
       }
-      setTimeout(() => {
-        if (!transitioned) {
-          transitioned = true;
-          try {
-            removeWebViewModeListener(onExpand);
-          } catch {
-            // ignore
-          }
-          applyMode();
-        }
-      }, 1000);
-    } else {
-      applyMode();
+    } catch (e) {
+      console.warn('requestExpandedMode:', e);
     }
   };
 
