@@ -558,6 +558,13 @@ function YourResultsView({
 
   const handleCreateYourOwn = (e: ReactMouseEvent<HTMLButtonElement>) => {
     try {
+      sessionStorage.setItem('rate_exe_intent', 'create');
+      sessionStorage.removeItem('rate_exe_selected_mode');
+    } catch {
+      // ignore
+    }
+
+    try {
       if (getWebViewMode() !== 'expanded') {
         let transitioned = false;
         const onExpand = (mode: 'inline' | 'expanded') => {
@@ -573,7 +580,7 @@ function YourResultsView({
         };
         try {
           addWebViewModeListener(onExpand);
-          (requestExpandedMode as any)(e.nativeEvent);
+          requestExpandedMode(e.nativeEvent, 'default');
         } catch {
           onCreateYourOwn?.();
           return;
@@ -588,7 +595,7 @@ function YourResultsView({
             }
             onCreateYourOwn?.();
           }
-        }, 700);
+        }, 1000);
         return;
       }
     } catch {
@@ -698,6 +705,13 @@ function CommunityResultsView({
 
   const handleCreateYourOwn = (e: ReactMouseEvent<HTMLButtonElement>) => {
     try {
+      sessionStorage.setItem('rate_exe_intent', 'create');
+      sessionStorage.removeItem('rate_exe_selected_mode');
+    } catch {
+      // ignore
+    }
+
+    try {
       if (getWebViewMode() !== 'expanded') {
         let transitioned = false;
         const onExpand = (mode: 'inline' | 'expanded') => {
@@ -713,7 +727,7 @@ function CommunityResultsView({
         };
         try {
           addWebViewModeListener(onExpand);
-          (requestExpandedMode as any)(e.nativeEvent);
+          requestExpandedMode(e.nativeEvent, 'default');
         } catch {
           onCreateYourOwn?.();
           return;
@@ -728,7 +742,7 @@ function CommunityResultsView({
             }
             onCreateYourOwn?.();
           }
-        }, 700);
+        }, 1000);
         return;
       }
     } catch {

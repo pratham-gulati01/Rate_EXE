@@ -28,9 +28,22 @@ export const App = () => {
           setSubreddit(data.subreddit);
         }
 
-        if (data.challenge) {
+        let intent: string | null = null;
+        let savedMode: GameMode | null = null;
+        try {
+          intent = sessionStorage.getItem('rate_exe_intent');
+          savedMode = sessionStorage.getItem('rate_exe_selected_mode') as GameMode | null;
+        } catch {
+          // ignore
+        }
+
+        if (data.challenge && intent !== 'create') {
           setChallenge(data.challenge);
           setScreen('game');
+        } else if (data.challenge && intent === 'create') {
+          setChallenge(data.challenge);
+          setSetupInitialMode(savedMode === 'rating' || savedMode === 'yes_no' ? savedMode : null);
+          setScreen('setup');
         } else if (data.setup) {
           setScreen('setup');
         } else {
@@ -74,7 +87,15 @@ export const App = () => {
     return (
       <SetupApp
         initialMode={setupInitialMode}
-        onBack={challenge ? () => setScreen('game') : undefined}
+        onBack={challenge ? () => {
+          try {
+            sessionStorage.removeItem('rate_exe_intent');
+            sessionStorage.removeItem('rate_exe_selected_mode');
+          } catch {
+            // ignore
+          }
+          setScreen('game');
+        } : undefined}
       />
     );
   }
@@ -86,6 +107,7 @@ export const App = () => {
         initialSubreddit={subreddit}
         onCreateYourOwn={() => {
           try {
+            sessionStorage.setItem('rate_exe_intent', 'create');
             sessionStorage.removeItem('rate_exe_selected_mode');
           } catch {
             // ignore

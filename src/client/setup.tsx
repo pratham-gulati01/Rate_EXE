@@ -241,6 +241,7 @@ export const SetupApp = ({
   const startMode = (chosenMode: GameMode, event: ReactMouseEvent<HTMLButtonElement>) => {
     try {
       sessionStorage.setItem('rate_exe_selected_mode', chosenMode);
+      sessionStorage.setItem('rate_exe_intent', 'create');
     } catch {
       // ignore
     }
@@ -267,7 +268,7 @@ export const SetupApp = ({
       };
       try {
         addWebViewModeListener(onExpand);
-        (requestExpandedMode as any)(event.nativeEvent);
+        requestExpandedMode(event.nativeEvent, 'default');
       } catch (e) {
         console.warn('requestExpandedMode:', e);
         applyMode();
@@ -283,7 +284,7 @@ export const SetupApp = ({
           }
           applyMode();
         }
-      }, 700);
+      }, 1000);
     } else {
       applyMode();
     }
@@ -499,6 +500,13 @@ export const SetupApp = ({
         }),
       });
 
+      try {
+        sessionStorage.removeItem('rate_exe_intent');
+        sessionStorage.removeItem('rate_exe_selected_mode');
+      } catch {
+        // ignore
+      }
+
       // Fix lag & glitch: exit expanded mode smoothly before navigating
       try {
         if (getWebViewMode() === 'expanded') {
@@ -528,6 +536,12 @@ export const SetupApp = ({
               type="button"
               className="setup-back-btn"
               onClick={(event) => {
+                try {
+                  sessionStorage.removeItem('rate_exe_intent');
+                  sessionStorage.removeItem('rate_exe_selected_mode');
+                } catch {
+                  // ignore
+                }
                 onBack();
                 try {
                   if (getWebViewMode() === 'expanded') {
@@ -628,6 +642,11 @@ export const SetupApp = ({
           type="button"
           className="setup-back-btn"
           onClick={() => {
+            try {
+              sessionStorage.removeItem('rate_exe_selected_mode');
+            } catch {
+              // ignore
+            }
             setMode(null);
             setNotice('');
           }}
