@@ -413,14 +413,21 @@ api.post('/subscribe', async (c) => {
   const subreddit = await getActiveSubreddit();
   try {
     await reddit.subscribeToCurrentSubreddit();
-    return c.json({ ok: true, subreddit });
-  } catch (err) {
-    console.warn('Subreddit subscribe warning:', err);
-    return c.json({ ok: false, subreddit });
+    return c.json({ status: 'success', ok: true, subreddit });
+  } catch (error) {
+    console.error('Failed to subscribe to subreddit:', error);
+    return c.json(
+      {
+        status: 'error',
+        ok: false,
+        message: error instanceof Error ? error.message : 'Failed to subscribe',
+      },
+      500
+    );
   }
 });
 
-// 8. Media Uploads with Safe Fallback
+// 8. Media Uploads with Safe Fallback (supports images, GIFs, and MP4 videos)
 api.post('/media', async (c) => {
   if (!context.userId) return c.json({ error: 'Sign in to upload media.' }, 401);
   const body = await c.req.json<{ dataUrls?: string[]; dataUrl?: string }>();
@@ -435,56 +442,23 @@ api.post('/media', async (c) => {
     return c.json({ error: 'Choose 1 to 30 images or videos.' }, 400);
   }
 
-  const uploadedUrls: string[] = [];
-  for (const url of dataUrls) {
-    try {
-      const uploaded = await media.upload({
-        url,
-        type: url.startsWith('data:image/gif') ? 'gif' : 'image',
-      });
-      uploadedUrls.push(uploaded.mediaUrl);
-    } catch (uploadErr) {
-      console.warn('media.upload fallback to direct url:', uploadErr);
-      uploadedUrls.push(url);
-    }
-  }
+  const isVideoDataUrl = (url: string) =>
+    url.startsWith('data:video/') || /\.(mp4|avi|webm|mov|mkv)(\?|$)/i.test(url);
 
-  return c.json({ imageUrl: uploadedUrls[0], imageUrls: uploadedUrls });
-});
-
-// 7. Subscribe to Current Subreddit
-api.post('/subscribe', async (c) => {
-  const subreddit = await getActiveSubreddit();
-  try {
-    await reddit.subscribeToCurrentSubreddit();
-    return c.json({ ok: true, subreddit });
-  } catch (err) {
-    console.warn('Subreddit subscribe warning:', err);
-    return c.json({ ok: false, subreddit });
-  }
-});
-
-// 8. Media Uploads with Safe Fallback
-api.post('/media', async (c) => {
-  if (!context.userId) return c.json({ error: 'Sign in to upload media.' }, 401);
-  const body = await c.req.json<{ dataUrls?: string[]; dataUrl?: string }>();
-  const rawUrls = Array.isArray(body.dataUrls)
-    ? body.dataUrls
-    : typeof body.dataUrl === 'string'
-      ? [body.dataUrl]
-      : [];
-  const dataUrls = rawUrls.filter((v) => typeof v === 'string' && v.trim().length > 0);
-
-  if (dataUrls.length === 0 || dataUrls.length > 30) {
-    return c.json({ error: 'Choose 1 to 30 images or videos.' }, 400);
-  }
+  const isGifDataUrl = (url: string) =>
+    url.startsWith('data:image/gif') || /\.gif(\?|$)/i.test(url);
 
   const uploadedUrls: string[] = [];
   for (const url of dataUrls) {
     try {
+      const mediaType: 'video' | 'gif' | 'image' = isVideoDataUrl(url)
+        ? 'video'
+        : isGifDataUrl(url)
+          ? 'gif'
+          : 'image';
       const uploaded = await media.upload({
         url,
-        type: url.startsWith('data:image/gif') ? 'gif' : 'image',
+        type: mediaType,
       });
       uploadedUrls.push(uploaded.mediaUrl);
     } catch (uploadErr) {

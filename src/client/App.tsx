@@ -85,6 +85,11 @@ export const App = () => {
         initialChallenge={challenge}
         initialSubreddit={subreddit}
         onCreateYourOwn={() => {
+          try {
+            sessionStorage.removeItem('rate_exe_selected_mode');
+          } catch {
+            // ignore
+          }
           setSetupInitialMode(null);
           setScreen('setup');
         }}

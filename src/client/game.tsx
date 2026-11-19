@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from 'react';
 import type { CSSProperties, TouchEvent, MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { navigateTo, requestExpandedMode } from '@devvit/web/client';
+import { isVideoUrl } from '../shared/game';
 import type { Challenge } from '../shared/game';
 
 type API<T> = T & { error?: string };
@@ -363,19 +364,30 @@ function RatingGamePlayStage({
         <div className="carousel-image-frame">
           {current?.imageUrl ? (
             <>
-              <img
-                src={current.imageUrl}
-                alt=""
-                className="carousel-main-image"
-                onClick={() => setExpandedImage(current.imageUrl ?? null)}
-              />
+              {isVideoUrl(current.imageUrl) ? (
+                <video
+                  src={current.imageUrl}
+                  className="carousel-main-image carousel-main-video"
+                  controls
+                  playsInline
+                  autoPlay
+                  loop
+                />
+              ) : (
+                <img
+                  src={current.imageUrl}
+                  alt=""
+                  className="carousel-main-image"
+                  onClick={() => setExpandedImage(current.imageUrl ?? null)}
+                />
+              )}
               <button
                 type="button"
                 className="carousel-expand-btn"
                 onClick={() => setExpandedImage(current.imageUrl ?? null)}
-                title="View full image"
+                title={isVideoUrl(current.imageUrl) ? 'View full video' : 'View full image'}
               >
-                ⛶ Full image
+                ⛶ {isVideoUrl(current.imageUrl) ? 'Full video' : 'Full image'}
               </button>
               {current?.text && current.text.trim().length > 0 && (
                 <div className="carousel-caption-overlay">
@@ -524,7 +536,17 @@ function RatingGamePlayStage({
             >
               ✕
             </button>
-            <img src={expandedImage} alt="" className="full-image-dialog-img" />
+            {isVideoUrl(expandedImage) ? (
+              <video
+                src={expandedImage}
+                controls
+                autoPlay
+                playsInline
+                className="full-image-dialog-img"
+              />
+            ) : (
+              <img src={expandedImage} alt="" className="full-image-dialog-img" />
+            )}
           </div>,
           document.body
         )}
@@ -602,11 +624,20 @@ function YourResultsView({
           {entries.map((entry, idx) => (
             <div key={entry.id || idx} className="verdict-thumb-slot">
               {entry.imageUrl ? (
-                <img
-                  src={entry.imageUrl}
-                  alt={entry.text ? entry.text : `Slide ${idx + 1}`}
-                  className="verdict-thumb-img"
-                />
+                isVideoUrl(entry.imageUrl) ? (
+                  <video
+                    src={entry.imageUrl}
+                    muted
+                    playsInline
+                    className="verdict-thumb-img"
+                  />
+                ) : (
+                  <img
+                    src={entry.imageUrl}
+                    alt={entry.text ? entry.text : `Slide ${idx + 1}`}
+                    className="verdict-thumb-img"
+                  />
+                )
               ) : (
                 <div className="verdict-thumb-text-fallback">
                   <span>{entry.text ? entry.text : `Item ${idx + 1}`}</span>
@@ -884,10 +915,15 @@ function GameCompletionModal({
     if (joining || joined) return;
     setJoining(true);
     try {
-      await request('/api/subscribe', { method: 'POST', body: '{}' });
+      const res = await fetch('/api/subscribe', { method: 'POST' });
+      const data = (await res.json()) as { status?: string; message?: string; ok?: boolean };
+      if (!res.ok || (data.status !== 'success' && !data.ok)) {
+        throw new Error(data.message || 'Failed to subscribe');
+      }
       setJoined(true);
       onNotice(`Joined r/${subreddit}! 🎉`);
-    } catch {
+    } catch (err) {
+      console.warn('Subscribe error:', err);
       try {
         navigateTo(`https://www.reddit.com/r/${subreddit}`);
         setJoined(true);

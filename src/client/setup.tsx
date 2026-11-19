@@ -31,12 +31,25 @@ const isAviFile = (file: File) =>
 const isAvifFile = (file: File) =>
   /\.avif$/i.test(file.name) || file.type === 'image/avif';
 
+const isMp4File = (file: File) =>
+  /\.mp4$/i.test(file.name) || file.type === 'video/mp4';
+
+const isVideoFile = (file: File) =>
+  isAviFile(file) ||
+  isMp4File(file) ||
+  file.type.startsWith('video/') ||
+  /\.(mp4|avi|webm|mov|mkv)$/i.test(file.name);
+
 const prepareImage = async (file: File): Promise<string> => {
-  if (isGifFile(file) || isAviFile(file)) {
+  // Never convert GIFs or Videos to canvas webp, otherwise video sound/animation is lost!
+  if (isGifFile(file) || isVideoFile(file)) {
     return await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
-      reader.onload = () => (typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error(`Could not read ${file.name}.`)));
+      reader.onload = () =>
+        typeof reader.result === 'string'
+          ? resolve(reader.result)
+          : reject(new Error(`Could not read ${file.name}.`));
       reader.readAsDataURL(file);
     });
   }
@@ -49,12 +62,15 @@ const prepareImage = async (file: File): Promise<string> => {
     const ctx = canvas.getContext('2d');
     ctx?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     bitmap.close();
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/webp', 0.82));
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/webp', 0.85));
     if (blob) {
       return await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onerror = () => reject(new Error(`Could not prepare ${file.name}.`));
-        reader.onload = () => (typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error(`Could not prepare ${file.name}.`)));
+        reader.onload = () =>
+          typeof reader.result === 'string'
+            ? resolve(reader.result)
+            : reject(new Error(`Could not prepare ${file.name}.`));
         reader.readAsDataURL(blob);
       });
     }
@@ -64,7 +80,10 @@ const prepareImage = async (file: File): Promise<string> => {
   return await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
-    reader.onload = () => (typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error(`Could not read ${file.name}.`)));
+    reader.onload = () =>
+      typeof reader.result === 'string'
+        ? resolve(reader.result)
+        : reject(new Error(`Could not read ${file.name}.`));
     reader.readAsDataURL(file);
   });
 };
@@ -158,7 +177,16 @@ export const SetupApp = ({
   onBack?: (() => void) | undefined;
 } = {}) => {
   const [mode, setMode] = useState<GameMode | null>(() => {
-    return initialMode ?? null;
+    if (initialMode) return initialMode;
+    try {
+      const saved = sessionStorage.getItem('rate_exe_selected_mode') as GameMode | null;
+      if (saved === 'rating' || saved === 'yes_no') {
+        return saved;
+      }
+    } catch {
+      // ignore
+    }
+    return null;
   });
   const [title, setTitle] = useState(initialMode === 'yes_no' ? 'Yes or No' : 'Rating');
   const [description, setDescription] = useState('');
@@ -184,10 +212,27 @@ export const SetupApp = ({
 
   // Sync mode with webview presentation:
   // - Closing expanded view returns back to "Choose a Mode" (inline)
+  // - When expanding from an inline click, restore the selected mode directly
   useEffect(() => {
     const handleModeChange = (newMode: 'inline' | 'expanded') => {
       if (newMode === 'inline') {
+        try {
+          sessionStorage.removeItem('rate_exe_selected_mode');
+        } catch {
+          // ignore
+        }
         setMode(null);
+      } else if (newMode === 'expanded') {
+        try {
+          const saved = sessionStorage.getItem('rate_exe_selected_mode') as GameMode | null;
+          if (saved === 'rating' || saved === 'yes_no') {
+            setMode(saved);
+            setTitle(saved === 'yes_no' ? 'Yes or No' : 'Rating');
+            setCategory(saved === 'yes_no' ? 'Yes or No' : 'Tech & Gaming');
+          }
+        } catch {
+          // ignore
+        }
       }
     };
 
@@ -208,6 +253,11 @@ export const SetupApp = ({
 
   const startMode = (chosenMode: GameMode, event: ReactMouseEvent<HTMLButtonElement>) => {
     try {
+      sessionStorage.setItem('rate_exe_selected_mode', chosenMode);
+    } catch {
+      // ignore
+    }
+    try {
       requestExpandedMode(event.nativeEvent, 'default');
     } catch (e) {
       console.warn('requestExpandedMode:', e);
@@ -221,6 +271,11 @@ export const SetupApp = ({
   const loadDraft = (draft: Challenge) => {
     setDraftId(draft.id);
     const draftMode = draft.mode === 'yes_no' ? 'yes_no' : 'rating';
+    try {
+      sessionStorage.setItem('rate_exe_selected_mode', draftMode);
+    } catch {
+      // ignore
+    }
     setMode(draftMode);
     setTitle(draft.title || (draftMode === 'yes_no' ? 'Yes or No' : 'Rating'));
     setDescription(draft.description || '');
@@ -234,18 +289,36 @@ export const SetupApp = ({
   const updateEntry = (entryId: string, patch: Partial<ChallengeEntry>) =>
     setEntries((current) => current.map((entry) => (entry.id === entryId ? { ...entry, ...patch } : entry)));
 
-  // Batch Image Upload
+  // Batch Image & Video Upload (Max 20 MB each)
   const uploadImages = async (selected: FileList | null) => {
     const files = Array.from(selected ?? []);
     if (!files.length) return;
-    const allowed = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/x-gif', 'image/avif', 'video/x-msvideo', 'video/avi', 'video/msvideo', 'video/mp4'];
-    const isAllowed = (file: File) => allowed.includes(file.type) || isGifFile(file) || isAviFile(file) || isAvifFile(file) || /\.(png|jpe?g|webp|gif|avif|avi|mp4)$/i.test(file.name);
+    const allowed = [
+      'image/png',
+      'image/jpeg',
+      'image/webp',
+      'image/gif',
+      'image/x-gif',
+      'image/avif',
+      'video/x-msvideo',
+      'video/avi',
+      'video/msvideo',
+      'video/mp4',
+      'video/webm',
+      'video/quicktime',
+    ];
+    const isAllowed = (file: File) =>
+      allowed.includes(file.type) ||
+      isGifFile(file) ||
+      isVideoFile(file) ||
+      isAvifFile(file) ||
+      /\.(png|jpe?g|webp|gif|avif|avi|mp4|webm|mov)$/i.test(file.name);
     if (files.some((file) => !isAllowed(file))) {
-      setNotice('Choose PNG, JPEG, WEBP, GIF, AVIF, or AVI files.');
+      setNotice('Choose PNG, JPEG, WEBP, GIF, AVIF, AVI, or MP4 files.');
       return;
     }
     if (files.some((file) => file.size > 20 * 1024 * 1024)) {
-      setNotice('Choose images under 20 MB each.');
+      setNotice('Choose images or videos under 20 MB each.');
       return;
     }
 
@@ -329,12 +402,30 @@ export const SetupApp = ({
     }
   };
 
-  // Single Item Attachment
+  // Single Item Attachment (Max 20 MB)
   const uploadSingleImage = async (entryId: string, file: File) => {
-    const allowed = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/x-gif', 'image/avif', 'video/x-msvideo', 'video/avi', 'video/msvideo', 'video/mp4'];
-    const isAllowed = allowed.includes(file.type) || isGifFile(file) || isAviFile(file) || isAvifFile(file) || /\.(png|jpe?g|webp|gif|avif|avi|mp4)$/i.test(file.name);
+    const allowed = [
+      'image/png',
+      'image/jpeg',
+      'image/webp',
+      'image/gif',
+      'image/x-gif',
+      'image/avif',
+      'video/x-msvideo',
+      'video/avi',
+      'video/msvideo',
+      'video/mp4',
+      'video/webm',
+      'video/quicktime',
+    ];
+    const isAllowed =
+      allowed.includes(file.type) ||
+      isGifFile(file) ||
+      isVideoFile(file) ||
+      isAvifFile(file) ||
+      /\.(png|jpe?g|webp|gif|avif|avi|mp4|webm|mov)$/i.test(file.name);
     if (!isAllowed) {
-      setNotice('Choose PNG, JPEG, WEBP, GIF, AVIF, or AVI files.');
+      setNotice('Choose PNG, JPEG, WEBP, GIF, AVIF, AVI, or MP4 files.');
       return;
     }
     if (file.size > 20 * 1024 * 1024) {
