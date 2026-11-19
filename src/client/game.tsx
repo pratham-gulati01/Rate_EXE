@@ -5,7 +5,6 @@ import { createPortal } from 'react-dom';
 import {
   addWebViewModeListener,
   getWebViewMode,
-  navigateTo,
   removeWebViewModeListener,
   requestExpandedMode,
 } from '@devvit/web/client';
@@ -955,20 +954,15 @@ function GameCompletionModal({
     setJoining(true);
     try {
       const res = await fetch('/api/subscribe', { method: 'POST' });
-      const data = (await res.json()) as { status?: string; message?: string; ok?: boolean };
-      if (!res.ok || (data.status !== 'success' && !data.ok)) {
+      const data = (await res.json()) as { status?: string; message?: string };
+      if (!res.ok || data.status !== 'success') {
         throw new Error(data.message || 'Failed to subscribe');
       }
       setJoined(true);
       onNotice(`Joined r/${subreddit}! 🎉`);
     } catch (err) {
       console.warn('Subscribe error:', err);
-      try {
-        navigateTo(`https://www.reddit.com/r/${subreddit}`);
-        setJoined(true);
-      } catch {
-        onNotice(`Visit r/${subreddit} to join!`);
-      }
+      onNotice(err instanceof Error ? err.message : 'Could not join subreddit right now.');
     } finally {
       setJoining(false);
     }

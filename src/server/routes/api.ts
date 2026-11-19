@@ -410,20 +410,12 @@ api.post('/comment/:id', async (c) => {
 
 // 7. Subscribe to Current Subreddit
 api.post('/subscribe', async (c) => {
-  const subreddit = await getActiveSubreddit();
   try {
     await reddit.subscribeToCurrentSubreddit();
-    return c.json({ status: 'success', ok: true, subreddit });
+    return c.json({ status: 'success' });
   } catch (error) {
     console.error('Failed to subscribe to subreddit:', error);
-    return c.json(
-      {
-        status: 'error',
-        ok: false,
-        message: error instanceof Error ? error.message : 'Failed to subscribe',
-      },
-      500
-    );
+    return c.json({ status: 'error', message: 'Failed to subscribe' }, 500);
   }
 });
 
