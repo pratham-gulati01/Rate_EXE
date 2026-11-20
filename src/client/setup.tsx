@@ -162,6 +162,10 @@ export const SetupApp = ({
   onBack?: (() => void) | undefined;
 } = {}) => {
   const [mode, setMode] = useState<GameMode | null>(() => {
+    const injected = typeof window !== 'undefined'
+      ? (window as unknown as { __RATE_EXE_MODE__?: GameMode }).__RATE_EXE_MODE__
+      : null;
+    if (injected === 'rating' || injected === 'yes_no') return injected;
     if (initialMode === 'rating' || initialMode === 'yes_no') return initialMode;
     try {
       const saved = (localStorage.getItem('rate_exe_selected_mode') ||
@@ -175,12 +179,18 @@ export const SetupApp = ({
     return null;
   });
   const [title, setTitle] = useState(() => {
-    const active = initialMode ?? (typeof sessionStorage !== 'undefined' ? (localStorage.getItem('rate_exe_selected_mode') || sessionStorage.getItem('rate_exe_selected_mode')) : null);
+    const injected = typeof window !== 'undefined'
+      ? (window as unknown as { __RATE_EXE_MODE__?: GameMode }).__RATE_EXE_MODE__
+      : null;
+    const active = injected ?? initialMode ?? (typeof sessionStorage !== 'undefined' ? (localStorage.getItem('rate_exe_selected_mode') || sessionStorage.getItem('rate_exe_selected_mode')) : null);
     return active === 'yes_no' ? 'Yes or No' : 'Rating';
   });
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState(() => {
-    const active = initialMode ?? (typeof sessionStorage !== 'undefined' ? (localStorage.getItem('rate_exe_selected_mode') || sessionStorage.getItem('rate_exe_selected_mode')) : null);
+    const injected = typeof window !== 'undefined'
+      ? (window as unknown as { __RATE_EXE_MODE__?: GameMode }).__RATE_EXE_MODE__
+      : null;
+    const active = injected ?? initialMode ?? (typeof sessionStorage !== 'undefined' ? (localStorage.getItem('rate_exe_selected_mode') || sessionStorage.getItem('rate_exe_selected_mode')) : null);
     return active === 'yes_no' ? 'Yes or No' : 'Tech & Gaming';
   });
   const [entries, setEntries] = useState<ChallengeEntry[]>([{ id: makeId(), text: '' }]);
@@ -231,7 +241,7 @@ export const SetupApp = ({
 
     try {
       if (getWebViewMode() !== 'expanded') {
-        requestExpandedMode(event.nativeEvent, 'default');
+        requestExpandedMode(event.nativeEvent, chosenMode);
       }
     } catch (e) {
       console.warn('requestExpandedMode:', e);
@@ -482,44 +492,6 @@ export const SetupApp = ({
     }
   };
 
-  // INLINE PRESENTATION:
-  // Setup forms must never be shown inline in feed. Show clean launcher card.
-  if (getWebViewMode() !== 'expanded' && !onBack) {
-    return (
-      <main className="setup-shell setup-mode-shell inline-launcher-card">
-        <header className="setup-brand">
-          <span className="brand-mark">R</span>
-          <span>
-            RATE<span className="accent">.EXE</span>
-          </span>
-          <span className="setup-label">CHALLENGE CREATOR</span>
-        </header>
-
-        <section className="mode-select-centered-section">
-          <h1 className="mode-select-centered-title">Create a Challenge</h1>
-          <p className="mode-desc" style={{ marginBottom: '18px', textAlign: 'center' }}>
-            Set up an interactive Rating or Yes/No challenge for your community.
-          </p>
-
-          <button
-            type="button"
-            className="action-btn submit-btn"
-            style={{ width: '100%', maxWidth: '320px', margin: '0 auto', padding: '14px 20px', fontSize: '15px' }}
-            onClick={(e) => {
-              try {
-                requestExpandedMode(e.nativeEvent, 'default');
-              } catch (err) {
-                console.warn(err);
-              }
-            }}
-          >
-            ⛶ Open Creator
-          </button>
-        </section>
-      </main>
-    );
-  }
-
   // SCREEN 1: Choose a Mode (Centered, no extra text, POST SETUP tag)
   if (!mode) {
     return (
@@ -535,6 +507,9 @@ export const SetupApp = ({
                   sessionStorage.removeItem('rate_exe_selected_mode');
                 } catch {
                   // ignore
+                }
+                if (typeof window !== 'undefined') {
+                  (window as any).__RATE_EXE_MODE__ = null;
                 }
                 void fetch('/api/mode', { method: 'DELETE' });
                 onBack();
@@ -636,28 +611,19 @@ export const SetupApp = ({
         <button
           type="button"
           className="setup-back-btn"
-          onClick={(event) => {
+          onClick={() => {
             try {
               localStorage.removeItem('rate_exe_selected_mode');
               sessionStorage.removeItem('rate_exe_selected_mode');
             } catch {
               // ignore
             }
+            if (typeof window !== 'undefined') {
+              (window as any).__RATE_EXE_MODE__ = null;
+            }
             void fetch('/api/mode', { method: 'DELETE' });
             setNotice('');
-
-            if (onBack) {
-              onBack();
-              try {
-                if (getWebViewMode() === 'expanded') {
-                  exitExpandedMode(event.nativeEvent);
-                }
-              } catch {
-                /* ignore */
-              }
-            } else {
-              setMode(null);
-            }
+            setMode(null);
           }}
         >
           ← Back

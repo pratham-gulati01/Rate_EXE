@@ -30,7 +30,13 @@ export const App = () => {
         }
 
         let initialGameMode: GameMode | null = null;
-        if (data.selectedMode === 'rating' || data.selectedMode === 'yes_no') {
+        const injectedMode = typeof window !== 'undefined'
+          ? (window as unknown as { __RATE_EXE_MODE__?: GameMode }).__RATE_EXE_MODE__
+          : null;
+
+        if (injectedMode === 'rating' || injectedMode === 'yes_no') {
+          initialGameMode = injectedMode;
+        } else if (data.selectedMode === 'rating' || data.selectedMode === 'yes_no') {
           initialGameMode = data.selectedMode;
         } else {
           try {
@@ -119,6 +125,9 @@ export const App = () => {
             localStorage.removeItem('rate_exe_selected_mode');
           } catch {
             // ignore
+          }
+          if (typeof window !== 'undefined') {
+            (window as any).__RATE_EXE_MODE__ = null;
           }
           void fetch('/api/mode', { method: 'DELETE' });
           setSetupInitialMode(null);

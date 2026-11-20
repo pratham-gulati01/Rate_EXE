@@ -20,6 +20,14 @@
       "default": {
         "entry": "index.html",
         "height": "tall"
+      },
+      "rating": {
+        "entry": "rating.html",
+        "height": "tall"
+      },
+      "yes_no": {
+        "entry": "yes_no.html",
+        "height": "tall"
       }
     }
   },
