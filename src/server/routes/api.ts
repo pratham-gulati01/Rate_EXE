@@ -99,6 +99,17 @@ api.get('/init', async (c) => {
 
   const subreddit = await getActiveSubreddit();
 
+  const user = context.userId || 'anon';
+  let selectedMode: GameMode | null = null;
+  try {
+    const rawMode = await redis.get(`${prefix()}user_mode:${user}`);
+    if (rawMode === 'rating' || rawMode === 'yes_no') {
+      selectedMode = rawMode;
+    }
+  } catch (e) {
+    console.warn('Error reading user_mode:', e);
+  }
+
   return c.json({
     username: context.username ?? 'Redditor',
     postId: context.postId ?? null,
@@ -106,8 +117,28 @@ api.get('/init', async (c) => {
     challenge: challenge ?? null,
     userRating,
     stats,
+    selectedMode,
     setup: isSetup && !challenge,
   });
+});
+
+// Mode selection persistence for cross-webview / mobile expanded modal
+api.post('/mode', async (c) => {
+  const user = context.userId || 'anon';
+  const body = await c.req.json<{ mode?: string }>();
+  if (body.mode === 'rating' || body.mode === 'yes_no') {
+    await redis.set(`${prefix()}user_mode:${user}`, body.mode, {
+      expiration: new Date(Date.now() + 15 * 60 * 1000), // 15 mins TTL
+    });
+    return c.json({ ok: true });
+  }
+  return c.json({ error: 'Invalid mode' }, 400);
+});
+
+api.delete('/mode', async (c) => {
+  const user = context.userId || 'anon';
+  await redis.del(`${prefix()}user_mode:${user}`);
+  return c.json({ ok: true });
 });
 
 // 2. Drafts Management
@@ -200,6 +231,11 @@ api.post('/publish', async (c) => {
   };
 
   await redis.set(challengeKey(id), JSON.stringify(challenge));
+  try {
+    await redis.del(`${prefix()}user_mode:${userId}`);
+  } catch {
+    // ignore
+  }
 
   // Submit custom post to Reddit with user attribution and UGC
   let post;
@@ -261,6 +297,11 @@ api.post('/publish', async (c) => {
   }
 
   await redis.set(challengeKey(id), JSON.stringify(challenge));
+  try {
+    await redis.del(`${prefix()}user_mode:${userId}`);
+  } catch {
+    // ignore
+  }
 
   const postUrl = `https://reddit.com/r/${subredditName}/comments/${post.id}`;
   return c.json({ ok: true, challenge, postUrl });

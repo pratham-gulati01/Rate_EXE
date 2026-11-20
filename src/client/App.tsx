@@ -8,6 +8,7 @@ type InitResult = {
   challenge?: Challenge | null;
   setup?: boolean;
   subreddit?: string;
+  selectedMode?: GameMode | null;
   error?: string;
 };
 
@@ -28,16 +29,23 @@ export const App = () => {
           setSubreddit(data.subreddit);
         }
 
-        let savedMode: GameMode | null = null;
-        try {
-          savedMode = sessionStorage.getItem('rate_exe_selected_mode') as GameMode | null;
-        } catch {
-          // ignore
+        let initialGameMode: GameMode | null = null;
+        if (data.selectedMode === 'rating' || data.selectedMode === 'yes_no') {
+          initialGameMode = data.selectedMode;
+        } else {
+          try {
+            const local = (localStorage.getItem('rate_exe_selected_mode') ||
+              sessionStorage.getItem('rate_exe_selected_mode')) as GameMode | null;
+            if (local === 'rating' || local === 'yes_no') {
+              initialGameMode = local;
+            }
+          } catch {
+            // ignore
+          }
         }
 
-        const validSavedMode = savedMode === 'rating' || savedMode === 'yes_no' ? savedMode : null;
-        if (validSavedMode) {
-          setSetupInitialMode(validSavedMode);
+        if (initialGameMode) {
+          setSetupInitialMode(initialGameMode);
         }
 
         if (data.challenge) {
@@ -88,11 +96,12 @@ export const App = () => {
         initialMode={setupInitialMode}
         onBack={challenge ? () => {
           try {
-            sessionStorage.removeItem('rate_exe_intent');
             sessionStorage.removeItem('rate_exe_selected_mode');
+            localStorage.removeItem('rate_exe_selected_mode');
           } catch {
             // ignore
           }
+          void fetch('/api/mode', { method: 'DELETE' });
           setScreen('game');
         } : undefined}
       />
@@ -106,11 +115,12 @@ export const App = () => {
         initialSubreddit={subreddit}
         onCreateYourOwn={() => {
           try {
-            sessionStorage.setItem('rate_exe_intent', 'create');
             sessionStorage.removeItem('rate_exe_selected_mode');
+            localStorage.removeItem('rate_exe_selected_mode');
           } catch {
             // ignore
           }
+          void fetch('/api/mode', { method: 'DELETE' });
           setSetupInitialMode(null);
           setScreen('setup');
         }}

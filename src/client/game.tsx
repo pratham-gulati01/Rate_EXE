@@ -558,11 +558,12 @@ function YourResultsView({
 
   const handleCreateYourOwn = (e: ReactMouseEvent<HTMLButtonElement>) => {
     try {
-      sessionStorage.setItem('rate_exe_intent', 'create');
+      localStorage.removeItem('rate_exe_selected_mode');
       sessionStorage.removeItem('rate_exe_selected_mode');
     } catch {
       // ignore
     }
+    void fetch('/api/mode', { method: 'DELETE' });
 
     try {
       if (getWebViewMode() !== 'expanded') {
@@ -705,11 +706,12 @@ function CommunityResultsView({
 
   const handleCreateYourOwn = (e: ReactMouseEvent<HTMLButtonElement>) => {
     try {
-      sessionStorage.setItem('rate_exe_intent', 'create');
+      localStorage.removeItem('rate_exe_selected_mode');
       sessionStorage.removeItem('rate_exe_selected_mode');
     } catch {
       // ignore
     }
+    void fetch('/api/mode', { method: 'DELETE' });
 
     try {
       if (getWebViewMode() !== 'expanded') {
